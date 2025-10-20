@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# env
+.env
+.env.*.local
+
+# logs & runtime
+logs/
+*.log
+pids/
+*.pid
+*.pid.lock
+
+# build/coverage/cache
+dist/
+build/
+coverage/
+.nyc_output/
+.cache/
+tmp/
+
+# system/IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
