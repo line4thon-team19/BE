@@ -1,0 +1,35 @@
+BadRequest:
+  description: 잘못된 요청
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          message: { type: string, example: Invalid idx or already answered }
+
+NotFound:
+  description: 없음/만료됨
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          message: { type: string, example: Session not found or expired }
+
+Conflict:
+  description: 상태 충돌
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          message: { type: string, example: Result not ready }
+
+ServerError:
+  description: 서버 오류
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          message: { type: string, example: Internal Server Error }

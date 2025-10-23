@@ -1,0 +1,6 @@
+GuestResponse:
+  type: object
+  properties:
+    playerId: { type: string, example: plr_w2a1bC7X9pQe }
+    guestToken: { type: string, description: JWT Bearer token }
+    expiresAt: { type: string, format: date-time, example: 2025-10-22T12:34:56.000Z }

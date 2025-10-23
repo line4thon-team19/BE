@@ -1,0 +1,19 @@
+openapi: 3.0.3
+info:
+  title: 4thon-team19 API
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Local
+
+paths:
+  /api/health:
+    $ref: './paths/users.yaml#/paths/~1api~1health'
+  /api/guest:
+    $ref: './paths/users.yaml#/paths/~1api~1guest'
+
+components:
+  schemas:
+    $ref: './components/schemas.yaml'
+  responses:
+    $ref: './components/responses.yaml'
