@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "private": true,
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -24,15 +26,16 @@
   "homepage": "https://github.com/line4thon-team19/BE#readme",
   "dependencies": {
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.6.1",
     "express": "^5.1.0",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
-    "nodemon": "^3.1.0",
+    "nodemon": "^3.1.10",
     "prettier": "^3.6.2"
   }
 }
