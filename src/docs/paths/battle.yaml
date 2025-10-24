@@ -1,0 +1,50 @@
+paths:
+  /api/battle/rooms:
+    post:
+      tags: [Battle]
+      summary: 배틀룸 생성
+      description: >
+        게스트 토큰으로 배틀룸(세션)을 생성합니다.
+        생성 시 상태는 항상 `waiting`이며,
+        클라이언트가 `state`, `round`, `status` 필드를 지정하면 400을 반환합니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId:
+                    type: string
+                    example: p_8c3a10f2
+                  roomCode:
+                    type: string
+                    example: A1B2C3
+                  status:
+                    type: string
+                    enum: [waiting, playing, ended]
+                    example: waiting
+                  hostId:
+                    type: string
+                    example: plr_w2a1bC7X9pQe
+                  inviteLink:
+                    type: string
+                    format: uri
+                    example: 'https://app.example.com/join/A1B2C3'
+        '400':
+          $ref: '../components/responses.yaml#/BadRequest'
+        '401':
+          description: 인증 실패
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 'Unauthorized: token missing'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'
