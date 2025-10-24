@@ -10,7 +10,7 @@ jobs:
 
     env:
       EC2_HOST: ${{ secrets.EC2_HOST }}
-      MYSQL_USER: ${{ secrets.MYSQL_USER }}
+      MYSQL_USER: ${{ secrets.MYSQL_USER }} 
       MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
       MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -70,5 +70,9 @@ jobs:
       - name: Deploy on EC2
         run: |
           ssh -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "
-            cd /home/ubuntu/app && docker compose up -d --build
+            set -e
+            cd /home/ubuntu/app
+            ls -la | sed -n '1,120p'
+            [ -f docker-compose.yml ] || { echo 'docker-compose.yml 없음'; exit 1; }
+            docker compose up -d --build
           "

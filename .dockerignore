@@ -1,0 +1,36 @@
+# deps & caches
+node_modules
+.pnpm-store
+.npm
+.cache
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# VCS
+.git
+.gitignore
+.github
+
+# env & secrets
+.env
+.env.* 
+!*.example
+
+# tests & coverage
+__tests__/
+tests/
+coverage/
+
+# local builds/artifacts
+dist/
+build/
+
+# misc
+.DS_Store
+
+# docker/ci
+docker-compose*.yml
