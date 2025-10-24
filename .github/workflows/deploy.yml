@@ -1,0 +1,74 @@
+name: CI-CD
+
+on:
+  push:
+    branches: [ "develop" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      MYSQL_USER: ${{ secrets.MYSQL_USER }} 
+      MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+      MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      JWT_EXPIRES: ${{ secrets.JWT_EXPIRES }}
+      APP_PORT: "3000"
+      NODE_ENV: "production"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+      - name: Install rsync
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+      - name: Generate .env on runner
+        run: |
+          cat > .env <<EOF
+APP_PORT=$APP_PORT
+NODE_ENV=$NODE_ENV
+
+# MySQL
+MYSQL_USER=$MYSQL_USER
+MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
+MYSQL_DATABASE=$MYSQL_DATABASE
+
+# Redis
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+# DB URL
+DATABASE_URL=mysql://$MYSQL_USER:$MYSQL_ROOT_PASSWORD@mysql:3306/$MYSQL_DATABASE
+
+# JWT
+JWT_SECRET=$JWT_SECRET
+JWT_EXPIRES=$JWT_EXPIRES
+EOF
+
+      - name: Sync project files to EC2
+        run: |
+          rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no" \
+            ./ ubuntu@$EC2_HOST:/home/ubuntu/app/
+
+      - name: Upload .env to EC2
+        run: |
+          rsync -avz -e "ssh -o StrictHostKeyChecking=no" \
+            .env ubuntu@$EC2_HOST:/home/ubuntu/app/.env
+          ssh -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "chmod 600 /home/ubuntu/app/.env"
+
+      - name: Deploy on EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "
+            cd /home/ubuntu/app && docker compose up -d --build
+          "
