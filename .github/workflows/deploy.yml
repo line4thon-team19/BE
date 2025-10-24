@@ -10,7 +10,7 @@ jobs:
 
     env:
       EC2_HOST: ${{ secrets.EC2_HOST }}
-      MYSQL_USER: ${{ secrets.MYSQL_USER }} 
+      MYSQL_USER: ${{ secrets.MYSQL_USER }}
       MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
       MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -33,32 +33,32 @@ jobs:
           sudo apt-get install -y rsync
 
       - name: Generate .env on runner
+        shell: bash
         run: |
-          cat > .env <<EOF
-APP_PORT=$APP_PORT
-NODE_ENV=$NODE_ENV
-
-# MySQL
-MYSQL_USER=$MYSQL_USER
-MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
-MYSQL_DATABASE=$MYSQL_DATABASE
-
-# Redis
-REDIS_HOST=redis
-REDIS_PORT=6379
-
-# DB URL
-DATABASE_URL=mysql://$MYSQL_USER:$MYSQL_ROOT_PASSWORD@mysql:3306/$MYSQL_DATABASE
-
-# JWT
-JWT_SECRET=$JWT_SECRET
-JWT_EXPIRES=$JWT_EXPIRES
-EOF
+          {
+            echo "APP_PORT=$APP_PORT"
+            echo "NODE_ENV=$NODE_ENV"
+            echo
+            echo "# MySQL"
+            echo "MYSQL_USER=$MYSQL_USER"
+            echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD"
+            echo "MYSQL_DATABASE=$MYSQL_DATABASE"
+            echo
+            echo "# Redis (상수)"
+            echo "REDIS_HOST=redis"
+            echo "REDIS_PORT=6379"
+            echo
+            echo "# DB URL"
+            echo "DATABASE_URL=mysql://$MYSQL_USER:$MYSQL_ROOT_PASSWORD@mysql:3306/$MYSQL_DATABASE"
+            echo
+            echo "# JWT"
+            echo "JWT_SECRET=$JWT_SECRET"
+            echo "JWT_EXPIRES=$JWT_EXPIRES"
+          } > .env
 
       - name: Sync project files to EC2
         run: |
-          rsync -avz --delete \
-            -e "ssh -o StrictHostKeyChecking=no" \
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" \
             ./ ubuntu@$EC2_HOST:/home/ubuntu/app/
 
       - name: Upload .env to EC2
