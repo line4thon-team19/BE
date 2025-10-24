@@ -12,7 +12,15 @@ paths:
   /api/guest:
     $ref: './paths/users.yaml#/paths/~1api~1guest'
 
+  /api/battle/rooms:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1rooms'
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     $ref: './components/schemas.yaml'
   responses:
