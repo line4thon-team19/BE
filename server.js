@@ -11,14 +11,19 @@ const notFound = require('./src/middlewares/notFound');
 const errorHandler = require('./src/middlewares/errorHandler');
 
 const PORT = process.env.PORT || 3000;
+const ENABLE_SWAGGER = process.env.ENABLE_SWAGGER === 'true';
 
 (async () => {
-  try {
-    const root = path.join(__dirname, 'src/docs/openapi.yaml');
-    const bundled = await $RefParser.bundle(root);
-    app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(bundled));
-    app.get('/api/docs.json', (_req, res) => res.json(bundled));
-    console.log('Swagger docs:', `http://localhost:${PORT}/api/docs`);
+   try {
+    if (ENABLE_SWAGGER) {
+      const root = path.join(__dirname, 'src/docs/openapi.yaml');
+      const bundled = await $RefParser.bundle(root);
+      app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(bundled));
+      app.get('/api/docs.json', (_req, res) => res.json(bundled));
+      console.log('Swagger UI enabled at:', `http://localhost:${PORT}/api/docs`);
+    } else {
+      console.log('Swagger UI disabled. Set ENABLE_SWAGGER=true to enable.');
+    }
   } catch (e) {
     console.error('Swagger bundle failed:', e);
   }
@@ -26,8 +31,8 @@ const PORT = process.env.PORT || 3000;
   app.use(notFound);
   app.use(errorHandler);
 
+    // HTTP 서버 + socket.io
   const server = http.createServer(app);
-  // socket.io 서버 생성 및 연결
   const io = new Server(server, {
     cors: {
       origin: '*', // 개발 단계에서는 전체 허용

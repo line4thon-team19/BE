@@ -54,6 +54,7 @@ jobs:
             echo "# JWT"
             echo "JWT_SECRET=$JWT_SECRET"
             echo "JWT_EXPIRES=$JWT_EXPIRES"
+            echo "ENABLE_SWAGGER=true"
           } > .env
 
       - name: Sync project files to EC2
