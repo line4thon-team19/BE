@@ -1,79 +1,54 @@
 name: CI-CD
-
 on:
   push:
-    branches: [ "develop" ]
+    branches: [develop]
+
+concurrency:
+  group: deploy-develop
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    env:
-      EC2_HOST: ${{ secrets.EC2_HOST }}
-      MYSQL_USER: ${{ secrets.MYSQL_USER }} 
-      MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
-      MYSQL_DATABASE: ${{ secrets.MYSQL_DATABASE }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
-      JWT_EXPIRES: ${{ secrets.JWT_EXPIRES }}
-      APP_PORT: "3000"
-      NODE_ENV: "production"
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup SSH agent
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Install rsync
+      - name: Build & Push
         run: |
-          sudo apt-get update
-          sudo apt-get install -y rsync
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/4thon:latest .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/4thon:latest
 
-      - name: Generate .env on runner
-        shell: bash
-        run: |
-          {
-            echo "APP_PORT=$APP_PORT"
-            echo "NODE_ENV=$NODE_ENV"
-            echo
-            echo "# MySQL"
-            echo "MYSQL_USER=$MYSQL_USER"
-            echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD"
-            echo "MYSQL_DATABASE=$MYSQL_DATABASE"
-            echo
-            echo "# Redis (상수)"
-            echo "REDIS_HOST=redis"
-            echo "REDIS_PORT=6379"
-            echo
-            echo "# DB URL"
-            echo "DATABASE_URL=mysql://$MYSQL_USER:$MYSQL_ROOT_PASSWORD@mysql:3306/$MYSQL_DATABASE"
-            echo
-            echo "# JWT"
-            echo "JWT_SECRET=$JWT_SECRET"
-            echo "JWT_EXPIRES=$JWT_EXPIRES"
-            echo "ENABLE_SWAGGER=true"
-          } > .env
-
-      - name: Sync project files to EC2
-        run: |
-          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" \
-            ./ ubuntu@$EC2_HOST:/home/ubuntu/app/
-
-      - name: Upload .env to EC2
-        run: |
-          rsync -avz -e "ssh -o StrictHostKeyChecking=no" \
-            .env ubuntu@$EC2_HOST:/home/ubuntu/app/.env
-          ssh -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "chmod 600 /home/ubuntu/app/.env"
-
-      - name: Deploy on EC2
-        run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
             set -e
-            cd /home/ubuntu/app
-            ls -la | sed -n '1,120p'
+            APP_DIR="${REMOTE_PATH:-/home/${USER}/app}"
+            cd "$APP_DIR"
+
+            # compose 파일/디렉토리 존재 확인
             [ -f docker-compose.yml ] || { echo 'docker-compose.yml 없음'; exit 1; }
-            docker compose up -d --build
-          "
+
+            # 최신 이미지 받기 및 재기동
+            docker compose pull
+            docker compose up -d
+
+            # 간단 헬스체크
+            for i in {1..20}; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/healthz || true)
+              [ "$code" = "200" ] && { echo 'healthz OK'; exit 0; }
+              sleep 2
+            done
+            echo 'healthz FAIL'
+            docker compose logs --no-color --tail=200 app
+            exit 1
