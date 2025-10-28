@@ -6,5 +6,8 @@ const genRoomCode = customAlphabet(ROOM_ALPHABET, 6);
 function newBattleSessionId() {
   return `b_${nanoid(8)}`; // 배틀 전용 세션
 }
-
-module.exports = { genRoomCode, newBattleSessionId };
+function newPracticeSessionId() {
+  return `p_${nanoid(8)}`; // 연습 전용 세션
+}
+ 
+module.exports = { genRoomCode, newBattleSessionId, newPracticeSessionId };
