@@ -33,3 +33,21 @@ ServerError:
         type: object
         properties:
           message: { type: string, example: Internal Server Error }
+
+Unauthorized: 
+  description: 인증 실패
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          message: { type: string, example: Invalid guest token }
+
+NotEnoughQuestions: 
+  description: 문제가 충분하지 않음
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          message: { type: string, example: 문제가 5개 이상 필요합니다. }

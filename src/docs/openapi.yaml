@@ -12,8 +12,13 @@ paths:
   /api/guest:
     $ref: './paths/users.yaml#/paths/~1api~1guest'
 
+  # 배틀모드
   /api/battle/rooms:
     $ref: './paths/battle.yaml#/paths/~1api~1battle~1rooms'
+
+  # 연습모드
+  /api/practice/start:
+    $ref: './paths/practice.yaml#/paths/~1api~1practice~1start'
 
 components:
   securitySchemes:

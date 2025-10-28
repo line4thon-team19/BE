@@ -1,0 +1,67 @@
+paths:
+  /api/practice/start:
+    post:
+      tags: [Practice]
+      summary: 연습모드 시작하기(방 생성)
+      security:
+        - bearerAuth: [] 
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                countdownSec:
+                  type: integer
+                  minimum: 0
+                  maximum: 30
+                  default: 3
+      responses:
+        '200':
+          description: Practice session started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId: { type: string, example: p_ab12cd34 }
+                  state:     { type: string, enum: [PLAYING, ENDED], example: PLAYING }
+                  countdown:
+                    type: object
+                    properties:
+                      seconds: { type: integer, example: 3 }
+                    required: [seconds]
+                  round:
+                    type: object
+                    properties:
+                      current: { type: integer, example: 1 }
+                      total:   { type: integer, example: 5 }
+                    required: [current, total]
+                  timeLimit: { type: integer, example: 10 }
+                  questions:
+                    type: array
+                    minItems: 5
+                    maxItems: 5
+                    items:
+                      type: object
+                      properties:
+                        questionId: { type: string, example: "8" }
+                        text:       { type: string, example: "집에 (   ) 버스 타고 가?" }
+                        options:
+                          type: array
+                          minItems: 2
+                          maxItems: 2
+                          items: { type: string }
+                      required: [questionId, text, options]
+                required: [sessionId, state, countdown, round, timeLimit, questions]
+        '400':
+          $ref: '../components/responses.yaml#/BadRequest'
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '404':
+          $ref: '../components/responses.yaml#/NotFound'
+        '409':
+          $ref: '../components/responses.yaml#/Conflict'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'
