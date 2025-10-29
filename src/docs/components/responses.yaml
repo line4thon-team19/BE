@@ -51,3 +51,12 @@ NotEnoughQuestions:
         type: object
         properties:
           message: { type: string, example: 문제가 5개 이상 필요합니다. }
+
+Forbidden:
+  description: 권한 없음
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          message: { type: string, example: 방장만 카운트다운을 시작할 수 있습니다. }

@@ -41,6 +41,72 @@ paths:
         '404':
           $ref: '../components/responses.yaml#/NotFound'
         '409':
-          $ref: '../components/responses.yaml#/Conflict'  
+          $ref: '../components/responses.yaml#/Conflict'
         '500':
           $ref: '../components/responses.yaml#/ServerError'
+
+  /api/battle/{sessionId}/start:
+    post:
+      tags: [Battle]
+      summary: 배틀룸 카운트다운 시작(방장)
+      description: >
+        방장이 카운트다운을 시작합니다. 카운트다운이 끝나면 서버가 자동으로 `status`를 `playing`으로 업데이트합니다.
+        중복 시작 방지를 위해 이미 카운트다운 진행 중이거나 `waiting`이 아닌 경우 409를 반환합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                countdownSec:
+                  type: integer
+                  minimum: 0
+                  maximum: 30
+                  default: 3
+      responses:
+        '200':
+          description: Countdown started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  started: { type: boolean, example: true }
+                  status: { type: string, enum: [waiting, playing, ended], example: waiting }
+                  countdown:
+                    type: object
+                    properties:
+                      seconds: { type: integer, example: 3 }
+                    required: [seconds]
+                  questions:
+                    type: array
+                    minItems: 5
+                    maxItems: 5
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, example: '12' }
+                        text: { type: string, example: '우리 학교의 교장 선생님입니다.' }
+                        wrongText:
+                          {
+                            type: string,
+                            nullable: true,
+                            example: '우리 학교에 교장 선생님입니다.',
+                          }
+                      required: [id, text]
+                required: [started, status, countdown, questions]
+      '400': { $ref: '../components/responses.yaml#/BadRequest' }
+      '401': { $ref: '../components/responses.yaml#/Unauthorized' }
+      '403': { $ref: '../components/responses.yaml#/Forbidden' }
+      '404': { $ref: '../components/responses.yaml#/NotFound' }
+      '409': { $ref: '../components/responses.yaml#/Conflict' }
+      '422': { $ref: '../components/responses.yaml#/NotEnoughQuestions' }
+      '500': { $ref: '../components/responses.yaml#/ServerError' }
