@@ -6,12 +6,6 @@ const { existsRoomCode, createSession } = require('../repositories/battleSession
 const router = express.Router();
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://app.example.com';
 
-/**
- * POST /api/battle/rooms
- * 헤더: Authorization: Bearer <guestToken>
- * 응답: 201 { sessionId, roomCode, status:'waiting', hostId, inviteLink }
- * 금지: body에 state/round/status 포함 시 400
- */
 router.post('/rooms', authenticateGuest, async (req, res) => {
   try {
     // 금지 필드 검사

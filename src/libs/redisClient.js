@@ -9,7 +9,7 @@ function buildRedisUrl() {
   const host =
     process.env.REDIS_HOST ||
     (process.env.NODE_ENV === 'production' ? 'redis' : '127.0.0.1');
-  const port = process.env.REDIS_PORT || '6379';
+  const port = process.env.REDIS_PORT || '6380';
 
   return `redis://${host}:${port}`;
 }
