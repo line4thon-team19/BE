@@ -29,4 +29,32 @@ async function createSession(session) {
   return session;
 }
 
-module.exports = { existsRoomCode, createSession };
+// 세션 조회
+async function getSession(sessionId) {
+  const redis = await getRedis();
+  const key = keys.battleSession(sessionId);
+  const raw = await redis.get(key);
+  return raw ? JSON.parse(raw) : null;
+}
+
+// 세션 부분 업데이트
+async function updateSession(sessionId, patch) {
+  const redis = await getRedis();
+  if (!isRedisReady()) throw new Error('Redis not ready');
+
+  const key = keys.battleSession(sessionId);
+  const raw = await redis.get(key);
+  if (!raw) return null;
+
+  const current = JSON.parse(raw);
+  const next = { ...current, ...patch };
+  await redis.multi().set(key, JSON.stringify(next)).expire(key, TTL).exec();
+  return next;
+}
+
+module.exports = {
+  existsRoomCode,
+  createSession,
+  getSession,
+  updateSession,
+};

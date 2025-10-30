@@ -15,6 +15,8 @@ paths:
   # 배틀모드
   /api/battle/rooms:
     $ref: './paths/battle.yaml#/paths/~1api~1battle~1rooms'
+  /api/battle/{sessionId}/start:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1start'
 
   # 연습모드
   /api/practice/start:
