@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { getMysql } = require('../libs/mysqlClient');
-const { createPracticeSession } = require('../repositories/practiceSessionRepo');
+const { createPracticeSession, getPracticeSession, savePracticeSession } = require('../repositories/practiceSessionRepo');
 
 const router = express.Router();
 
@@ -76,6 +76,111 @@ router.post('/start', authenticateGuest, express.json(), async (req, res) => {
     });
   } catch (e) {
     console.error('[POST /practice/start] error:', e);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+// 정답 제출 
+router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { round, answer } = req.body || {};
+
+    // round 파싱
+    let clientRound = null;
+    if (typeof round === 'number') {
+      clientRound = round;
+    } else if (round && typeof round.current === 'number') {
+      clientRound = round.current;
+    }
+
+    if (!Number.isInteger(clientRound) || clientRound < 1) {
+      return res.status(400).json({ message: 'round must be an integer >= 1 or { current: integer }' });
+    }
+
+    if (answer !== 'choice1' && answer !== 'choice2') {
+      return res.status(400).json({ message: 'answer must be "choice1" or "choice2"' });
+    }
+
+    const sess = await getPracticeSession(sessionId);
+    if (!sess) return res.status(404).json({ message: 'Session not found or expired' });
+    if (sess.state === 'ENDED') {
+      return res.status(409).json({ message: 'Already ended' });
+    }
+    if (sess.guestId && sess.guestId !== req.user.playerId) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const serverCurrent = Number(sess.round?.current ?? 1);
+    const total = Number(sess.round?.total ?? (sess.questions?.length || 0));
+
+    // 라운드 동기화 체크
+    if (serverCurrent !== clientRound) {
+      return res.status(409).json({
+        code: 'ROUND_MISMATCH',
+        message: `Client round(${clientRound}) != Server round(${serverCurrent})`,
+      });
+    }
+
+    const idx = serverCurrent - 1;
+    const q = sess.questions?.[idx];
+    if (!q) return res.status(409).json({ message: 'Round index out of range' });
+
+    const already = Array.isArray(sess.answers) && sess.answers.some(a => a.round === serverCurrent);
+    if (already) return res.status(409).json({ message: 'Already answered this round' });
+
+    const isCorrect = (answer === q.answerLabel);
+
+    // 진행 기록 업데이트
+    sess.answers = Array.isArray(sess.answers) ? sess.answers : [];
+    sess.answers.push({
+      round: serverCurrent,
+      questionId: q.id,
+      answer,
+      correct: isCorrect,
+      answeredAt: new Date().toISOString()
+    });
+
+    sess.score = (sess.score ?? 0) + (isCorrect ? 1 : 0);
+    sess.wrongCount = (sess.wrongCount ?? 0) + (isCorrect ? 0 : 1);
+
+    const isLast = serverCurrent >= total;
+
+    if (isLast) {
+      sess.state = 'ENDED';
+      await savePracticeSession(sess);
+      return res.json({
+        state: 'ENDED',
+        round: { current: serverCurrent, total },
+        result: isCorrect ? 'correct' : 'wrong',
+        next: { hasNext: false }
+      });
+    }
+
+    // 다음 라운드
+    sess.round.current = serverCurrent + 1;
+    const nq = sess.questions[sess.round.current - 1];
+
+    if (typeof sess.timeLimit === 'number') {
+      sess.remainingTime = sess.timeLimit;
+    }
+
+    await savePracticeSession(sess);
+
+    return res.json({
+      round: { current: sess.round.current, total },
+      next: {
+        hasNext: true,
+        result: isCorrect ? 'correct' : 'wrong',
+        question: {
+          questionId: String(nq.id),
+          text: nq.text,
+          options: [nq.choice1, nq.choice2]
+        }
+      }
+    });
+  } catch (e) {
+    console.error('[POST /practice/:sessionId/answer] error:', e);
     return res.status(500).json({ message: 'Internal Server Error' });
   }
 });

@@ -21,6 +21,8 @@ paths:
   # 연습모드
   /api/practice/start:
     $ref: './paths/practice.yaml#/paths/~1api~1practice~1start'
+  /api/practice/{sessionId}/answer:
+    $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}~1answer'
 
 components:
   securitySchemes:
