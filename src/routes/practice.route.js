@@ -80,11 +80,23 @@ router.post('/start', authenticateGuest, express.json(), async (req, res) => {
   }
 });
 
-// 정답 제출
-router.post('/:sessionId/answer', authenticateGuest, async (req, res) => {
+// 정답 제출 
+router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { answer } = req.body;
+    const { round, answer } = req.body || {};
+
+    // round 파싱
+    let clientRound = null;
+    if (typeof round === 'number') {
+      clientRound = round;
+    } else if (round && typeof round.current === 'number') {
+      clientRound = round.current;
+    }
+
+    if (!Number.isInteger(clientRound) || clientRound < 1) {
+      return res.status(400).json({ message: 'round must be an integer >= 1 or { current: integer }' });
+    }
 
     if (answer !== 'choice1' && answer !== 'choice2') {
       return res.status(400).json({ message: 'answer must be "choice1" or "choice2"' });
@@ -95,20 +107,26 @@ router.post('/:sessionId/answer', authenticateGuest, async (req, res) => {
     if (sess.state === 'ENDED') {
       return res.status(409).json({ message: 'Already ended' });
     }
-
-    // 본인 세션만 제한
     if (sess.guestId && sess.guestId !== req.user.playerId) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    const cur = sess.round?.current ?? 1;
-    const total = sess.round?.total ?? (sess.questions?.length || 0);
-    const idx = cur - 1;
+    const serverCurrent = Number(sess.round?.current ?? 1);
+    const total = Number(sess.round?.total ?? (sess.questions?.length || 0));
+
+    // 라운드 동기화 체크
+    if (serverCurrent !== clientRound) {
+      return res.status(409).json({
+        code: 'ROUND_MISMATCH',
+        message: `Client round(${clientRound}) != Server round(${serverCurrent})`,
+      });
+    }
+
+    const idx = serverCurrent - 1;
     const q = sess.questions?.[idx];
     if (!q) return res.status(409).json({ message: 'Round index out of range' });
 
-    // 같은 라운드 중복 제출 방지
-    const already = Array.isArray(sess.answers) && sess.answers.some(a => a.round === cur);
+    const already = Array.isArray(sess.answers) && sess.answers.some(a => a.round === serverCurrent);
     if (already) return res.status(409).json({ message: 'Already answered this round' });
 
     const isCorrect = (answer === q.answerLabel);
@@ -116,36 +134,33 @@ router.post('/:sessionId/answer', authenticateGuest, async (req, res) => {
     // 진행 기록 업데이트
     sess.answers = Array.isArray(sess.answers) ? sess.answers : [];
     sess.answers.push({
-      round: cur,
+      round: serverCurrent,
       questionId: q.id,
-      answer,                 // "choice1" | "choice2"
+      answer,
       correct: isCorrect,
       answeredAt: new Date().toISOString()
     });
 
-    // 점수 집계
     sess.score = (sess.score ?? 0) + (isCorrect ? 1 : 0);
     sess.wrongCount = (sess.wrongCount ?? 0) + (isCorrect ? 0 : 1);
 
-    // 마지막 라운드인지 판단
-    const isLast = cur >= total;
+    const isLast = serverCurrent >= total;
 
     if (isLast) {
       sess.state = 'ENDED';
       await savePracticeSession(sess);
       return res.json({
         state: 'ENDED',
-        round: { current: cur, total },
+        round: { current: serverCurrent, total },
         result: isCorrect ? 'correct' : 'wrong',
         next: { hasNext: false }
       });
     }
 
-    // 다음 문제로 이동
-    sess.round.current = cur + 1;
+    // 다음 라운드
+    sess.round.current = serverCurrent + 1;
     const nq = sess.questions[sess.round.current - 1];
 
-    // 라운드 타이머 리셋
     if (typeof sess.timeLimit === 'number') {
       sess.remainingTime = sess.timeLimit;
     }

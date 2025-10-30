@@ -4,7 +4,7 @@ paths:
       tags: [Practice]
       summary: 연습모드 시작하기(방 생성)
       security:
-        - bearerAuth: [] 
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -18,7 +18,7 @@ paths:
                   maximum: 30
                   default: 3
       responses:
-        '200':
+        "200":
           description: Practice session started
           content:
             application/json:
@@ -26,7 +26,7 @@ paths:
                 type: object
                 properties:
                   sessionId: { type: string, example: p_ab12cd34 }
-                  state:     { type: string, enum: [PLAYING, ENDED], example: PLAYING }
+                  state: { type: string, enum: [PLAYING, ENDED], example: PLAYING }
                   countdown:
                     type: object
                     properties:
@@ -36,7 +36,7 @@ paths:
                     type: object
                     properties:
                       current: { type: integer, example: 1 }
-                      total:   { type: integer, example: 5 }
+                      total: { type: integer, example: 5 }
                     required: [current, total]
                   timeLimit: { type: integer, example: 10 }
                   questions:
@@ -47,7 +47,7 @@ paths:
                       type: object
                       properties:
                         questionId: { type: string, example: "8" }
-                        text:       { type: string, example: "집에 (   ) 버스 타고 가?" }
+                        text: { type: string, example: "집에 (   ) 버스 타고 가?" }
                         options:
                           type: array
                           minItems: 2
@@ -55,18 +55,13 @@ paths:
                           items: { type: string }
                       required: [questionId, text, options]
                 required: [sessionId, state, countdown, round, timeLimit, questions]
-        '400':
-          $ref: '../components/responses.yaml#/BadRequest'
-        '401':
-          $ref: '../components/responses.yaml#/Unauthorized'
-        '404':
-          $ref: '../components/responses.yaml#/NotFound'
-        '409':
-          $ref: '../components/responses.yaml#/Conflict'
-        '500':
-          $ref: '../components/responses.yaml#/ServerError'
+        "400": { $ref: "../components/responses.yaml#/BadRequest" }
+        "401": { $ref: "../components/responses.yaml#/Unauthorized" }
+        "404": { $ref: "../components/responses.yaml#/NotFound" }
+        "409": { $ref: "../components/responses.yaml#/Conflict" }
+        "500": { $ref: "../components/responses.yaml#/ServerError" }
 
-  # 정답 제출        
+  # 정답 제출
   /api/practice/{sessionId}/answer:
     post:
       tags: [Practice]
@@ -86,41 +81,49 @@ paths:
             schema:
               type: object
               properties:
+                round:
+                  oneOf:
+                    - type: integer
+                      minimum: 1
+                      example: 3
+                    - type: object
+                      properties:
+                        current: { type: integer, minimum: 1, example: 3 }
+                      required: [current]
                 answer:
                   type: string
                   enum: [choice1, choice2]
-              required: [answer]
+                required: [round, answer]
             examples:
-              choice1:
-                value: { answer: "choice1" }
-              choice2:
-                value: { answer: "choice2" }
+              choice1_r3:
+                value: { round: 3, answer: "choice1" }
+              choice2_r1:
+                value: { round: { current: 1 }, answer: "choice2" }
       responses:
-        '200':
+        "200":
           description: 다음 문제 또는 종료 안내
           content:
             application/json:
               schema:
                 oneOf:
-                  # 다음 문제가 남아있는 경우
                   - type: object
                     properties:
                       round:
                         type: object
                         properties:
                           current: { type: integer, example: 3 }
-                          total:   { type: integer,  example: 5 }
+                          total: { type: integer, example: 5 }
                         required: [current, total]
                       next:
                         type: object
                         properties:
                           hasNext: { type: boolean, example: true }
-                          result:  { type: string, enum: [correct, wrong], example: correct }
+                          result: { type: string, enum: [correct, wrong], example: correct }
                           question:
                             type: object
                             properties:
                               questionId: { type: string, example: "9" }
-                              text:       { type: string, example: "그는 (   ) 운동을 했다." }
+                              text: { type: string, example: "그는 (   ) 운동을 했다." }
                               options:
                                 type: array
                                 minItems: 2
@@ -129,30 +132,24 @@ paths:
                             required: [questionId, text, options]
                         required: [hasNext, result, question]
                     required: [round, next]
-                  # 마지막 문제인 경우
                   - type: object
                     properties:
-                      state:   { type: string, enum: [ENDED], example: ENDED }
+                      state: { type: string, enum: [ENDED], example: ENDED }
                       round:
                         type: object
                         properties:
                           current: { type: integer, example: 5 }
-                          total:   { type: integer, example: 5 }
+                          total: { type: integer, example: 5 }
                         required: [current, total]
-                      result:  { type: string, enum: [correct, wrong], example: wrong }
+                      result: { type: string, enum: [correct, wrong], example: wrong }
                       next:
                         type: object
                         properties:
                           hasNext: { type: boolean, example: false }
                         required: [hasNext]
                     required: [state, round, result, next]
-        '400':
-          $ref: '../components/responses.yaml#/BadRequest'
-        '401':
-          $ref: '../components/responses.yaml#/Unauthorized'
-        '404':
-          $ref: '../components/responses.yaml#/NotFound'
-        '409':
-          $ref: '../components/responses.yaml#/Conflict'
-        '500':
-          $ref: '../components/responses.yaml#/ServerError'
+        "400": { $ref: "../components/responses.yaml#/BadRequest" }
+        "401": { $ref: "../components/responses.yaml#/Unauthorized" }
+        "404": { $ref: "../components/responses.yaml#/NotFound" }
+        "409": { $ref: "../components/responses.yaml#/Conflict" }
+        "500": { $ref: "../components/responses.yaml#/ServerError" }
