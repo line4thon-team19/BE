@@ -65,3 +65,94 @@ paths:
           $ref: '../components/responses.yaml#/Conflict'
         '500':
           $ref: '../components/responses.yaml#/ServerError'
+
+  # 정답 제출        
+  /api/practice/{sessionId}/answer:
+    post:
+      tags: [Practice]
+      summary: 연습모드 정답 제출
+      description: 현재 라운드의 정답 제출(마지막 라운드인 경우 `ENDED`)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                answer:
+                  type: string
+                  enum: [choice1, choice2]
+              required: [answer]
+            examples:
+              choice1:
+                value: { answer: "choice1" }
+              choice2:
+                value: { answer: "choice2" }
+      responses:
+        '200':
+          description: 다음 문제 또는 종료 안내
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  # 다음 문제가 남아있는 경우
+                  - type: object
+                    properties:
+                      round:
+                        type: object
+                        properties:
+                          current: { type: integer, example: 3 }
+                          total:   { type: integer,  example: 5 }
+                        required: [current, total]
+                      next:
+                        type: object
+                        properties:
+                          hasNext: { type: boolean, example: true }
+                          result:  { type: string, enum: [correct, wrong], example: correct }
+                          question:
+                            type: object
+                            properties:
+                              questionId: { type: string, example: "9" }
+                              text:       { type: string, example: "그는 (   ) 운동을 했다." }
+                              options:
+                                type: array
+                                minItems: 2
+                                maxItems: 2
+                                items: { type: string }
+                            required: [questionId, text, options]
+                        required: [hasNext, result, question]
+                    required: [round, next]
+                  # 마지막 문제인 경우
+                  - type: object
+                    properties:
+                      state:   { type: string, enum: [ENDED], example: ENDED }
+                      round:
+                        type: object
+                        properties:
+                          current: { type: integer, example: 5 }
+                          total:   { type: integer, example: 5 }
+                        required: [current, total]
+                      result:  { type: string, enum: [correct, wrong], example: wrong }
+                      next:
+                        type: object
+                        properties:
+                          hasNext: { type: boolean, example: false }
+                        required: [hasNext]
+                    required: [state, round, result, next]
+        '400':
+          $ref: '../components/responses.yaml#/BadRequest'
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '404':
+          $ref: '../components/responses.yaml#/NotFound'
+        '409':
+          $ref: '../components/responses.yaml#/Conflict'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'

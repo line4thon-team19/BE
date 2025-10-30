@@ -24,4 +24,21 @@ async function createPracticeSession(session) {
   }
 }
 
-module.exports = { createPracticeSession };
+async function getPracticeSession(sessionId) {
+  const redis = await getRedis();
+  if (!isRedisReady()) throw new Error('Redis not ready');
+  const key = keys.practiceSession(sessionId);
+  const raw = await redis.get(key);
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function savePracticeSession(session) {
+  const redis = await getRedis();
+  if (!isRedisReady()) throw new Error('Redis not ready');
+  if (!session?.sessionId) throw new Error('Invalid session payload');
+  const key = keys.practiceSession(session.sessionId);
+  await redis.set(key, JSON.stringify(session), { EX: TTL });
+  return key;
+}
+
+module.exports = { createPracticeSession, getPracticeSession, savePracticeSession };
