@@ -17,6 +17,8 @@ paths:
     $ref: './paths/battle.yaml#/paths/~1api~1battle~1rooms'
   /api/battle/{sessionId}/start:
     $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1start'
+  /api/battle/entry:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1entry'
 
   # 연습모드
   /api/practice/start:
@@ -33,14 +35,14 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
-    PracticeStartResponse:   { $ref: './components/schemas.yaml#/PracticeStartResponse' }
-    PracticeAnswerRequest:   { $ref: './components/schemas.yaml#/PracticeAnswerRequest' }
-    PracticeAnswerNext:      { $ref: './components/schemas.yaml#/PracticeAnswerNext' }
-    PracticeAnswerEnd:       { $ref: './components/schemas.yaml#/PracticeAnswerEnd' }
-    PracticeResultResponse:  { $ref: './components/schemas.yaml#/PracticeResultResponse' }
+    PracticeStartResponse: { $ref: './components/schemas.yaml#/PracticeStartResponse' }
+    PracticeAnswerRequest: { $ref: './components/schemas.yaml#/PracticeAnswerRequest' }
+    PracticeAnswerNext: { $ref: './components/schemas.yaml#/PracticeAnswerNext' }
+    PracticeAnswerEnd: { $ref: './components/schemas.yaml#/PracticeAnswerEnd' }
+    PracticeResultResponse: { $ref: './components/schemas.yaml#/PracticeResultResponse' }
   responses:
-    BadRequest:   { $ref: './components/responses.yaml#/BadRequest' }
+    BadRequest: { $ref: './components/responses.yaml#/BadRequest' }
     Unauthorized: { $ref: './components/responses.yaml#/Unauthorized' }
-    NotFound:     { $ref: './components/responses.yaml#/NotFound' }
-    Conflict:     { $ref: './components/responses.yaml#/Conflict' }
-    ServerError:  { $ref: './components/responses.yaml#/ServerError' }
+    NotFound: { $ref: './components/responses.yaml#/NotFound' }
+    Conflict: { $ref: './components/responses.yaml#/Conflict' }
+    ServerError: { $ref: './components/responses.yaml#/ServerError' }

@@ -52,9 +52,16 @@ async function updateSession(sessionId, patch) {
   return next;
 }
 
+async function getSessionIdByRoomCode(roomCode) {
+  const redis = await getRedis();
+  const sid = await redis.get(keys.battleRoomCode(roomCode));
+  return sid || null;
+}
+
 module.exports = {
   existsRoomCode,
   createSession,
   getSession,
   updateSession,
+  getSessionIdByRoomCode,
 };
