@@ -19,6 +19,8 @@ paths:
     $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1start'
   /api/battle/entry:
     $ref: './paths/battle.yaml#/paths/~1api~1battle~1entry'
+  /api/battle/{sessionId}/answer:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1answer'
 
   # 연습모드
   /api/practice/start:

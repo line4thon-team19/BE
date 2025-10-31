@@ -7,12 +7,23 @@ const {
   getSession,
   updateSession,
   getSessionIdByRoomCode,
+  getSessionBasicForPlay,
+  savePlayerAnswer,
+  getRoundWinner,
+  claimRoundWinner,
+  addScore,
+  advanceRoundOrEnd,
 } = require('../repositories/battleSessionRepo');
 const { getRandomBattleQuestions } = require('../repositories/battleQuestionRepo');
 
 const router = express.Router();
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://app.example.com';
 
+const toSTATE = (status) => String(status || '').toUpperCase();
+// 라운드 제한시간 30초
+const PER_ROUND_MS = 30 * 1000;
+
+/** 방 생성(방장) */
 router.post('/rooms', authenticateGuest, async (req, res) => {
   try {
     // 금지 필드 검사
@@ -132,6 +143,8 @@ router.post('/:sessionId/start', authenticateGuest, express.json(), async (req, 
           status: 'playing',
           startedAt: new Date().toISOString(),
           countdown: { ...cur.countdown, inProgress: false },
+          // 1 라운드 시작과 동시에 30초 제한
+          deadlineAt: Date.now() + PER_ROUND_MS,
         });
       } catch (e) {
         console.error(`[COUNTDOWN -> PLAYING] failed for ${sessionId}:`, e);
@@ -251,6 +264,131 @@ router.post('/entry', authenticateGuest, express.json(), async (req, res) => {
     });
   } catch (err) {
     console.error('[POST /api/battle/entry] error:', err);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+/** 정답 제출 */
+router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { round, answer } = req.body || {};
+    const playerId = req.user?.playerId;
+
+    if (!playerId) return res.status(401).json({ message: 'Unauthorized' });
+    if (!sessionId) return res.status(400).json({ message: 'Invalid sessionId' });
+    if (typeof round !== 'number' || typeof answer !== 'string' || !answer.trim()) {
+      return res.status(400).json({ message: 'round(number) and answer(string) are required' });
+    }
+
+    const base = await getSessionBasicForPlay(sessionId);
+    if (!base) return res.status(404).json({ message: 'Session not found or expired' });
+
+    const { status, roomCode, round: sessRound, hostId, correctAnswer, deadlineAt } = base;
+    if (status !== 'playing') {
+      return res.status(409).json({ message: 'Session is not in playing state' });
+    }
+
+    const currentRound = Number(sessRound?.current || 1);
+    const totalRounds = Number(sessRound?.total || 5);
+    if (round !== currentRound) {
+      return res.status(409).json({ message: 'Round mismatch' });
+    }
+
+    // 라운드 타임아웃 체크
+    const now = Date.now();
+    if (deadlineAt && Number(deadlineAt) > 0 && now > Number(deadlineAt)) {
+      // 타임아웃 시 서버에서 라운드 전진/종료
+      const moved = await advanceRoundOrEnd(sessionId, { perRoundMs: PER_ROUND_MS });
+      const hasNext = !moved?.ended && currentRound < totalRounds;
+      const nextRoundNumber = Math.min(currentRound + 1, totalRounds);
+
+      return res.status(201).json({
+        round: { current: nextRoundNumber, total: totalRounds }, 
+        next: { hasNext },
+        sessionId,
+        roomCode,
+        state: moved?.ended ? 'ENDED' : 'PLAYING',
+        result: 'timeout',
+        winner: null,
+        correctAnswer,
+      });
+    }
+
+    // 제출 로그
+    await savePlayerAnswer(sessionId, currentRound, playerId, answer);
+
+    // 다른 유저가 먼저 맞추면 이미 승자 존재
+    const roundWinner = await getRoundWinner(sessionId, currentRound);
+    if (roundWinner) {
+      const hasNext = currentRound < totalRounds;
+      const nextRoundNumber = Math.min(currentRound + 1, totalRounds);
+      return res.status(201).json({
+        round: { current: nextRoundNumber, total: totalRounds }, 
+        next: { hasNext },
+        sessionId,
+        roomCode,
+        state: hasNext ? 'PLAYING' : 'ENDED',
+        result: 'timeout',
+        winner: roundWinner,
+        correctAnswer,
+      });
+    }
+
+    // 정답 판정
+    const normalize = (s) => String(s || '').trim();
+    const isCorrect = normalize(answer) === normalize(correctAnswer);
+
+    if (!isCorrect) {
+      // 오답이면 라운드 유지
+      return res.status(201).json({
+        round: { current: currentRound, total: totalRounds }, 
+        next: { hasNext: false },
+        sessionId,
+        roomCode,
+        state: toSTATE(status),
+        result: 'wrong',
+        winner: null,
+        correctAnswer: null,
+      });
+    }
+
+    // 정답 선점
+    const claimed = await claimRoundWinner(sessionId, currentRound, playerId);
+    if (!claimed) {
+      const w = await getRoundWinner(sessionId, currentRound);
+      const hasNext = currentRound < totalRounds;
+      const nextRoundNumber = Math.min(currentRound + 1, totalRounds);
+      return res.status(201).json({
+        round: { current: nextRoundNumber, total: totalRounds },
+        next: { hasNext },
+        sessionId,
+        roomCode,
+        state: hasNext ? 'PLAYING' : 'ENDED',
+        result: 'timeout',
+        winner: w,
+        correctAnswer,
+      });
+    }
+
+    // 점수 반영 후 라운드 전진/종료
+    await addScore(sessionId, playerId, 1);
+    const moved = await advanceRoundOrEnd(sessionId, { perRoundMs: PER_ROUND_MS });
+    const hasNext = !moved?.ended && currentRound < totalRounds;
+    const nextRoundNumber = Math.min(currentRound + 1, totalRounds);
+
+    return res.status(201).json({
+      round: { current: nextRoundNumber, total: totalRounds },
+      next: { hasNext },
+      sessionId,
+      roomCode,
+      state: moved?.ended ? 'ENDED' : 'PLAYING',
+      result: 'correct',
+      winner: playerId,
+      correctAnswer,
+    });
+  } catch (err) {
+    console.error('[POST /api/battle/:sessionId/answer] error:', err);
     return res.status(500).json({ message: 'Internal Server Error' });
   }
 });

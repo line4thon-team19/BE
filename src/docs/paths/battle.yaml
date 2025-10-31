@@ -183,3 +183,85 @@ paths:
                   message: { type: string, example: Room is not in waiting state }
         '401': { $ref: '../components/responses.yaml#/Unauthorized' }
         '500': { $ref: '../components/responses.yaml#/ServerError' }
+
+  /api/battle/{sessionId}/answer:
+    post:
+      tags: [Battle]
+      summary: 배틀룸 정답 제출
+      description: |
+        현재 라운드에 정답을 제출합니다.  
+        - 첫 정답 선점자만 해당 라운드의 승자가 됩니다.  
+        - 이미 승자가 있거나 타이머가 만료된 후 제출하면 `result: timeout`으로 응답합니다.  
+        - 오답이면 `hasNext: false`로 현재 라운드를 유지합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [round, answer]
+              properties:
+                round:
+                  type: integer
+                  example: 3
+                answer:
+                  type: string
+                  example: '한 번 도전해 보자'
+      responses:
+        '201':
+          description: Answer judged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  round:
+                    type: object
+                    properties:
+                      current: { type: integer, example: 3 }
+                      total: { type: integer, example: 5 }
+                    required: [current, total]
+                  next:
+                    type: object
+                    properties:
+                      hasNext: { type: boolean, example: true }
+                    required: [hasNext]
+                  sessionId: { type: string, example: p_8c3a10f2 }
+                  roomCode: { type: string, example: A1B2C3 }
+                  state:
+                    type: string
+                    enum: [PLAYING, ENDED]
+                    example: PLAYING
+                  result:
+                    type: string
+                    enum: [correct, wrong, timeout]
+                    example: correct
+                  winner:
+                    type: string
+                    nullable: true
+                    description: 승자의 playerId. 승자 없음이면 null.
+                    example: plr_host
+                  correctAnswer:
+                    type: string
+                    nullable: true
+                    description: 정답. 오답일 때는 비노출(null).
+                    example: '한 번 도전해 보자'
+                required:
+                  - round
+                  - next
+                  - sessionId
+                  - roomCode
+                  - state
+                  - result
+        '400': { $ref: '../components/responses.yaml#/BadRequest' }
+        '401': { $ref: '../components/responses.yaml#/Unauthorized' }
+        '404': { $ref: '../components/responses.yaml#/NotFound' }
+        '409': { $ref: '../components/responses.yaml#/Conflict' }
+        '500': { $ref: '../components/responses.yaml#/ServerError' }
