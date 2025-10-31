@@ -188,7 +188,6 @@ router.post('/entry', authenticateGuest, express.json(), async (req, res) => {
     // 호스트가 호출하면 변경 없이 현재 상태 반환
     if (me === session.hostId) {
       if (seeded) {
-        // 시드가 발생했으면 저장만 한번 하고 반환
         await updateSession(sessionId, { players });
       }
       return res.json({
@@ -199,7 +198,7 @@ router.post('/entry', authenticateGuest, express.json(), async (req, res) => {
       });
     }
 
-    // 이미 방에 있으면 그대로 반환(idempotent)
+    // 이미 방에 있으면 그대로 반환
     if (players.some((p) => p.playerId === me)) {
       return res.json({
         sessionId,
@@ -222,15 +221,23 @@ router.post('/entry', authenticateGuest, express.json(), async (req, res) => {
       return res.status(500).json({ message: 'Failed to update session' });
     }
 
-    // (옵션) 웹소켓 브로드캐스트
+    // 웹소켓 브로드캐스트
     try {
-      const io = req.app.get('io');
+      const io = req.app.locals.io;
       if (io) {
+        console.log(`[WS] Emitting 'battle:player_joined' to room=${sessionId}`);
+        console.log(
+          `[WS] Players:`,
+          patched.players.map((p) => `${p.playerId}${p.isHost ? '(host)' : ''}`).join(', '),
+        );
+
         io.to(sessionId).emit('battle:player_joined', {
           sessionId,
           roomCode: patched.roomCode,
           players: patched.players,
         });
+
+        console.log(`[WS] Emit success: battle:player_joined`);
       }
     } catch (e) {
       console.warn('[WS] emit battle:player_joined failed:', e.message);
