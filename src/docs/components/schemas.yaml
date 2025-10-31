@@ -4,3 +4,112 @@ GuestResponse:
     playerId: { type: string, example: plr_w2a1bC7X9pQe }
     guestToken: { type: string, description: JWT Bearer token }
     expiresAt: { type: string, format: date-time, example: 2025-10-22T12:34:56.000Z }
+
+# 공통 객체
+PracticeRound:
+  type: object
+  properties:
+    current: { type: integer, minimum: 1, example: 1 }
+    total:   { type: integer, minimum: 1, example: 5 }
+  required: [current, total]
+
+PracticeCountdown:
+  type: object
+  properties:
+    seconds: { type: integer, minimum: 0, maximum: 30, example: 3 }
+  required: [seconds]
+
+PracticeQuestionPublic:
+  type: object
+  properties:
+    questionId: { type: string, example: "8" }
+    text:       { type: string, example: "집에 (   ) 버스 타고 가?" }
+    options:
+      type: array
+      minItems: 2
+      maxItems: 2
+      items: { type: string }
+  required: [questionId, text, options]
+
+# 요청 스키마
+PracticeAnswerRequest:
+  type: object
+  properties:
+    round:
+      oneOf:
+        - type: integer
+          minimum: 1
+          example: 3
+        - type: object
+          properties:
+            current: { type: integer, minimum: 1, example: 3 }
+          required: [current]
+    answer:
+      type: string
+      enum: [choice1, choice2]
+  required: [round, answer]
+
+# 응답 스키마
+PracticeStartResponse:
+  type: object
+  properties:
+    sessionId: { type: string, example: p_ab12cd34 }
+    state:     { type: string, enum: [PLAYING, ENDED], example: PLAYING }
+    countdown: { $ref: '#/PracticeCountdown' }
+    round:     { $ref: '#/PracticeRound' }
+    timeLimit: { type: integer, example: 10 }
+    questions:
+      type: array
+      minItems: 5
+      maxItems: 5
+      items: { $ref: '#/PracticeQuestionPublic' }
+  required: [sessionId, state, countdown, round, timeLimit, questions]
+
+PracticeAnswerNext:
+  type: object
+  properties:
+    round: { $ref: '#/PracticeRound' }
+    next:
+      type: object
+      properties:
+        hasNext: { type: boolean, example: true }
+        result:  { type: string, enum: [correct, wrong], example: correct }
+        question: { $ref: '#/PracticeQuestionPublic' }
+      required: [hasNext, result, question]
+  required: [round, next]
+
+PracticeAnswerEnd:
+  type: object
+  properties:
+    state: { type: string, enum: [ENDED], example: ENDED }
+    round: { $ref: '#/PracticeRound' }
+    result: { type: string, enum: [correct, wrong], example: wrong }
+    next:
+      type: object
+      properties:
+        hasNext: { type: boolean, example: false }
+      required: [hasNext]
+  required: [state, round, result, next]
+
+PracticeResultRow:
+  type: object
+  properties:
+    round:         { type: integer, example: 3 }
+    question:      { type: string,  example: "그는 (   ) 운동을 했다." }
+    answer:        { type: string,  example: "열심히" }
+    result:        { type: string,  enum: [correct, wrong], example: correct }
+    correctAnswer: { type: string,  example: "한 번", nullable: true }
+    explanation:   { type: string,  example: "수량/횟수일 때는 '한 번'을 씁니다.", nullable: true }
+  required: [round, question, answer, result]
+
+PracticeResultResponse:
+  type: object
+  properties:
+    state:       { type: string, enum: [ENDED], example: ENDED }
+    score:       { type: integer, example: 4 }
+    wrongCount:  { type: integer, example: 1 }
+    totalRounds: { type: integer, example: 5 }
+    questions:
+      type: array
+      items: { $ref: '#/PracticeResultRow' }
+  required: [state, score, wrongCount, totalRounds, questions]
