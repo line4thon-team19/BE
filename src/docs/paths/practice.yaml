@@ -23,50 +23,18 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  sessionId: { type: string, example: p_ab12cd34 }
-                  state: { type: string, enum: [PLAYING, ENDED], example: PLAYING }
-                  countdown:
-                    type: object
-                    properties:
-                      seconds: { type: integer, example: 3 }
-                    required: [seconds]
-                  round:
-                    type: object
-                    properties:
-                      current: { type: integer, example: 1 }
-                      total: { type: integer, example: 5 }
-                    required: [current, total]
-                  timeLimit: { type: integer, example: 10 }
-                  questions:
-                    type: array
-                    minItems: 5
-                    maxItems: 5
-                    items:
-                      type: object
-                      properties:
-                        questionId: { type: string, example: "8" }
-                        text: { type: string, example: "집에 (   ) 버스 타고 가?" }
-                        options:
-                          type: array
-                          minItems: 2
-                          maxItems: 2
-                          items: { type: string }
-                      required: [questionId, text, options]
-                required: [sessionId, state, countdown, round, timeLimit, questions]
-        "400": { $ref: "../components/responses.yaml#/BadRequest" }
-        "401": { $ref: "../components/responses.yaml#/Unauthorized" }
-        "404": { $ref: "../components/responses.yaml#/NotFound" }
-        "409": { $ref: "../components/responses.yaml#/Conflict" }
-        "500": { $ref: "../components/responses.yaml#/ServerError" }
+                $ref: '../components/schemas.yaml#/PracticeStartResponse'
+        "400": { $ref: '../components/responses.yaml#/BadRequest' }
+        "401": { $ref: '../components/responses.yaml#/Unauthorized' }
+        "404": { $ref: '../components/responses.yaml#/NotFound' }
+        "409": { $ref: '../components/responses.yaml#/Conflict' }
+        "500": { $ref: '../components/responses.yaml#/ServerError' }
 
-  # 정답 제출
   /api/practice/{sessionId}/answer:
     post:
       tags: [Practice]
       summary: 연습모드 정답 제출
-      description: 현재 라운드의 정답 제출(마지막 라운드인 경우 `ENDED`)
+      description: 현재 라운드의 정답을 제출합니다. 마지막 라운드면 세션이 `ENDED`로 전환됩니다.
       security:
         - bearerAuth: []
       parameters:
@@ -79,26 +47,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                round:
-                  oneOf:
-                    - type: integer
-                      minimum: 1
-                      example: 3
-                    - type: object
-                      properties:
-                        current: { type: integer, minimum: 1, example: 3 }
-                      required: [current]
-                answer:
-                  type: string
-                  enum: [choice1, choice2]
-                required: [round, answer]
-            examples:
-              choice1_r3:
-                value: { round: 3, answer: "choice1" }
-              choice2_r1:
-                value: { round: { current: 1 }, answer: "choice2" }
+              $ref: '../components/schemas.yaml#/PracticeAnswerRequest'
       responses:
         "200":
           description: 다음 문제 또는 종료 안내
@@ -106,50 +55,34 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - type: object
-                    properties:
-                      round:
-                        type: object
-                        properties:
-                          current: { type: integer, example: 3 }
-                          total: { type: integer, example: 5 }
-                        required: [current, total]
-                      next:
-                        type: object
-                        properties:
-                          hasNext: { type: boolean, example: true }
-                          result: { type: string, enum: [correct, wrong], example: correct }
-                          question:
-                            type: object
-                            properties:
-                              questionId: { type: string, example: "9" }
-                              text: { type: string, example: "그는 (   ) 운동을 했다." }
-                              options:
-                                type: array
-                                minItems: 2
-                                maxItems: 2
-                                items: { type: string }
-                            required: [questionId, text, options]
-                        required: [hasNext, result, question]
-                    required: [round, next]
-                  - type: object
-                    properties:
-                      state: { type: string, enum: [ENDED], example: ENDED }
-                      round:
-                        type: object
-                        properties:
-                          current: { type: integer, example: 5 }
-                          total: { type: integer, example: 5 }
-                        required: [current, total]
-                      result: { type: string, enum: [correct, wrong], example: wrong }
-                      next:
-                        type: object
-                        properties:
-                          hasNext: { type: boolean, example: false }
-                        required: [hasNext]
-                    required: [state, round, result, next]
-        "400": { $ref: "../components/responses.yaml#/BadRequest" }
-        "401": { $ref: "../components/responses.yaml#/Unauthorized" }
-        "404": { $ref: "../components/responses.yaml#/NotFound" }
-        "409": { $ref: "../components/responses.yaml#/Conflict" }
-        "500": { $ref: "../components/responses.yaml#/ServerError" }
+                  - $ref: '../components/schemas.yaml#/PracticeAnswerNext'
+                  - $ref: '../components/schemas.yaml#/PracticeAnswerEnd'
+        "400": { $ref: '../components/responses.yaml#/BadRequest' }
+        "401": { $ref: '../components/responses.yaml#/Unauthorized' }
+        "404": { $ref: '../components/responses.yaml#/NotFound' }
+        "409": { $ref: '../components/responses.yaml#/Conflict' }
+        "500": { $ref: '../components/responses.yaml#/ServerError' }
+
+  /api/practice/{sessionId}/result:
+    get:
+      tags: [Practice]
+      summary: 연습모드 결과 조회 (ENDED 상태에서만)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 결과 표
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/PracticeResultResponse'
+        "400": { $ref: '../components/responses.yaml#/BadRequest' }
+        "401": { $ref: '../components/responses.yaml#/Unauthorized' }
+        "404": { $ref: '../components/responses.yaml#/NotFound' }
+        "409": { $ref: '../components/responses.yaml#/Conflict' }
+        "500": { $ref: '../components/responses.yaml#/ServerError' }

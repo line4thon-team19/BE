@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: 4thon-team19 API
   version: 1.0.0
@@ -23,6 +23,8 @@ paths:
     $ref: './paths/practice.yaml#/paths/~1api~1practice~1start'
   /api/practice/{sessionId}/answer:
     $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}~1answer'
+  /api/practice/{sessionId}/result:
+    $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}~1result'
 
 components:
   securitySchemes:
@@ -31,6 +33,14 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
-    $ref: './components/schemas.yaml'
+    PracticeStartResponse:   { $ref: './components/schemas.yaml#/PracticeStartResponse' }
+    PracticeAnswerRequest:   { $ref: './components/schemas.yaml#/PracticeAnswerRequest' }
+    PracticeAnswerNext:      { $ref: './components/schemas.yaml#/PracticeAnswerNext' }
+    PracticeAnswerEnd:       { $ref: './components/schemas.yaml#/PracticeAnswerEnd' }
+    PracticeResultResponse:  { $ref: './components/schemas.yaml#/PracticeResultResponse' }
   responses:
-    $ref: './components/responses.yaml'
+    BadRequest:   { $ref: './components/responses.yaml#/BadRequest' }
+    Unauthorized: { $ref: './components/responses.yaml#/Unauthorized' }
+    NotFound:     { $ref: './components/responses.yaml#/NotFound' }
+    Conflict:     { $ref: './components/responses.yaml#/Conflict' }
+    ServerError:  { $ref: './components/responses.yaml#/ServerError' }

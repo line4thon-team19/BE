@@ -185,4 +185,52 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
   }
 });
 
+// 결과 조회
+router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const sess = await getPracticeSession(sessionId);
+    if (!sess) return res.status(404).json({ message: 'Session not found or expired' });
+
+    // 본인 세션만 허용
+    if (sess.guestId && sess.guestId !== req.user.playerId) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    if (sess.state !== 'ENDED') {
+      return res.status(409).json({ message: 'Not ended yet' });
+    }
+
+    const totalRounds = sess.round?.total ?? (sess.questions?.length || 0);
+
+    const answers = Array.isArray(sess.answers) ? sess.answers : [];
+    const rows = answers.map(a => {
+      const q = (sess.questions || []).find(x => x.id === a.questionId);
+      const correctText = q ? q[q.answerLabel] : undefined; 
+      const pickedText  = q ? q[a.answer]      : undefined; 
+
+      return {
+        round: a.round,
+        question: q ? q.text : '',
+        answer: pickedText,
+        result: a.correct ? 'correct' : 'wrong',
+        correctAnswer: correctText ?? null,
+        explanation: q?.explanation ?? null
+      };
+    });
+
+    return res.json({
+      state: 'ENDED',
+      score: sess.score ?? 0,
+      wrongCount: sess.wrongCount ?? 0,
+      totalRounds,
+      questions: rows
+    });
+  } catch (e) {
+    console.error('[GET /practice/:sessionId/result] error:', e);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
 module.exports = router;
