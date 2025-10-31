@@ -49,9 +49,11 @@ paths:
     post:
       tags: [Battle]
       summary: 배틀룸 카운트다운 시작(방장)
-      description: >
-        방장이 카운트다운을 시작합니다. 카운트다운이 끝나면 서버가 자동으로 `status`를 `playing`으로 업데이트합니다.
-        중복 시작 방지를 위해 이미 카운트다운 진행 중이거나 `waiting`이 아닌 경우 409를 반환합니다.
+      description: |
+        방장이 카운트다운을 시작합니다. 
+        - 카운트다운이 끝나면 서버가 자동으로 `status`를 `playing`으로 업데이트합니다. 
+        - 중복 시작 방지를 위해 이미 카운트다운 진행 중이거나 `waiting`이 아닌 경우 409를 반환합니다. 
+        - 참여 인원이 2명이 아닐 경우(상대 미입장) 409를 반환합니다.
       security:
         - bearerAuth: []
       parameters:
@@ -110,3 +112,74 @@ paths:
       '409': { $ref: '../components/responses.yaml#/Conflict' }
       '422': { $ref: '../components/responses.yaml#/NotEnoughQuestions' }
       '500': { $ref: '../components/responses.yaml#/ServerError' }
+
+  /api/battle/entry:
+    post:
+      tags: [Battle]
+      summary: 배틀룸 입장(상대 플레이어)
+      description: |
+        초대 코드(`roomCode`)로 대기 중인 배틀룸에 입장합니다.  
+        - 이미 2명이면 입장할 수 없습니다.
+        - 이 엔드포인트는 게스트 전용입니다. 방장(host)이 호출한 경우 방 상태만 반환하며 인원 추가는 수행하지 않습니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomCode]
+              properties:
+                roomCode:
+                  type: string
+                  example: A1B2C3
+      responses:
+        '200':
+          description: Joined
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId: { type: string, example: b_9p1v4t }
+                  roomCode: { type: string, example: A1B2C3 }
+                  state: { type: string, enum: [WAITING], example: WAITING }
+                  players:
+                    type: array
+                    minItems: 1
+                    maxItems: 2
+                    items:
+                      type: object
+                      properties:
+                        playerId: { type: string, example: plr_guest }
+                        isHost: { type: boolean, example: false }
+        '404':
+          description: Room Not Found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: 404_ROOM_NOT_FOUND }
+                  message: { type: string, example: Room not found }
+        '409':
+          description: Room Full
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: 409_ROOM_FULL }
+                  message: { type: string, example: Room already has 2 players }
+        '423':
+          description: Room Locked (Not waiting)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: 423_ROOM_LOCKED }
+                  message: { type: string, example: Room is not in waiting state }
+        '401': { $ref: '../components/responses.yaml#/Unauthorized' }
+        '500': { $ref: '../components/responses.yaml#/ServerError' }
