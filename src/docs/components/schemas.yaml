@@ -113,3 +113,40 @@ PracticeResultResponse:
       type: array
       items: { $ref: '#/PracticeResultRow' }
   required: [state, score, wrongCount, totalRounds, questions]
+
+PracticeResumePlaying:
+  type: object
+  properties:
+    sessionId: { type: string, example: p_ab12cd34 }
+    state: { type: string, enum: [PLAYING], example: PLAYING }
+    countdown:
+      type: object
+      properties:
+        seconds: { type: integer, example: 2 }
+      required: [seconds]
+      nullable: true
+    round: { $ref: '#/PracticeRound' }
+    timeLimit: { type: integer, nullable: true, example: 10 }
+    remainingTime: { type: integer, nullable: true, example: 8 }
+    answeredCount: { type: integer, example: 2 }
+    question:
+      allOf:
+        - $ref: '#/PracticeQuestionPublic'
+      nullable: true
+  required: [sessionId, state, round, answeredCount]
+
+PracticeResumeEnded:
+  type: object
+  properties:
+    sessionId: { type: string, example: p_ab12cd34 }
+    state: { type: string, enum: [ENDED], example: ENDED }
+    round: { $ref: '#/PracticeRound' }
+    score: { type: integer, example: 4 }
+    wrongCount: { type: integer, example: 1 }
+    totalRounds: { type: integer, example: 5 }
+  required: [sessionId, state, round, score, wrongCount, totalRounds]
+
+PracticeResumeResponse:
+  oneOf:
+    - $ref: '#/PracticeResumePlaying'
+    - $ref: '#/PracticeResumeEnded'
