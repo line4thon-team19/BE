@@ -344,7 +344,7 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     const base = await getSessionBasicForPlay(sessionId);
     if (!base) return res.status(404).json({ message: 'Session not found or expired' });
 
-    const { status, roomCode, round: sessRound, hostId, correctAnswer, deadlineAt } = base;
+    const { status, roomCode, round: sessRound, correctAnswer, deadlineAt } = base;
     if (status !== 'playing') {
       return res.status(409).json({ message: 'Session is not in playing state' });
     }
