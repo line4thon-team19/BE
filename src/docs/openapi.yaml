@@ -29,6 +29,8 @@ paths:
     $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}~1answer'
   /api/practice/{sessionId}/result:
     $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}~1result'
+  /api/practice/{sessionId}:
+    $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}'
 
 components:
   securitySchemes:
@@ -42,6 +44,9 @@ components:
     PracticeAnswerNext: { $ref: './components/schemas.yaml#/PracticeAnswerNext' }
     PracticeAnswerEnd: { $ref: './components/schemas.yaml#/PracticeAnswerEnd' }
     PracticeResultResponse: { $ref: './components/schemas.yaml#/PracticeResultResponse' }
+    PracticeResumePlaying:   { $ref: './components/schemas.yaml#/PracticeResumePlaying' }
+    PracticeResumeEnded:     { $ref: './components/schemas.yaml#/PracticeResumeEnded' }
+    PracticeResumeResponse:  { $ref: './components/schemas.yaml#/PracticeResumeResponse' }
   responses:
     BadRequest: { $ref: './components/responses.yaml#/BadRequest' }
     Unauthorized: { $ref: './components/responses.yaml#/Unauthorized' }
