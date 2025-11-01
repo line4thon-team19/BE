@@ -1,7 +1,8 @@
 require('dotenv').config();
 const http = require('http');
 const path = require('path');
-const { Server } = require('socket.io');
+// const { Server } = require('socket.io');
+const { initSocket } = require('./src/socket');
 
 const swaggerUi = require('swagger-ui-express');
 const $RefParser = require('@apidevtools/json-schema-ref-parser');
@@ -38,7 +39,7 @@ const ENABLE_SWAGGER = String(process.env.ENABLE_SWAGGER).toLowerCase() === 'tru
         swaggerUi.serve,
         swaggerUi.setup(undefined, {
           swaggerOptions: { url: '/api/docs.json?v=2' },
-        })
+        }),
       );
 
       console.log('[Swagger] enabled:', `http://localhost:${PORT}/api/docs`);
@@ -54,17 +55,21 @@ const ENABLE_SWAGGER = String(process.env.ENABLE_SWAGGER).toLowerCase() === 'tru
 
   // HTTP + Socket.IO
   const server = http.createServer(app);
-  const io = new Server(server, {
-    cors: { origin: '*', methods: ['GET', 'POST'] },
-  });
-  app.locals.io = io;
+  // const io = new Server(server, {
+  //   cors: { origin: '*', methods: ['GET', 'POST'] },
+  // });
+  // app.locals.io = io;
 
-  io.on('connection', (socket) => {
-    console.log('[socket.io] connected:', socket.id);
-    socket.on('disconnect', (reason) => {
-      console.log('[socket.io] disconnected:', socket.id, 'reason:', reason);
-    });
-  });
+  // io.on('connection', (socket) => {
+  //   console.log('[socket.io] connected:', socket.id);
+  //   socket.on('disconnect', (reason) => {
+  //     console.log('[socket.io] disconnected:', socket.id, 'reason:', reason);
+  //   });
+  // });
+
+  // initSocket 안에서 io를 만들고, 그 io를 되돌려 받자
+  const io = initSocket(server);
+  app.locals.io = io;
 
   server.listen(PORT, () => {
     console.log(`Server listening on http://localhost:${PORT}`);
