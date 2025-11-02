@@ -15,9 +15,19 @@ const {
   advanceRoundOrEnd,
 } = require('../repositories/battleSessionRepo');
 const { getRandomBattleQuestions } = require('../repositories/battleQuestionRepo');
+const { getRedis } = require('../libs/redisClient');
 
 const router = express.Router();
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://app.example.com';
+
+const ROOM = (sessionId) => `battle:room:${sessionId}`;
+const normalizeText = (s) =>
+  String(s || '')
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u200B-\u200D\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ');
 
 const toSTATE = (status) => String(status || '').toUpperCase();
 // 라운드 제한시간 30초
@@ -61,6 +71,21 @@ router.post('/rooms', authenticateGuest, async (req, res) => {
     };
 
     await createSession(session);
+
+    //  WS가 읽을 Redis 키 생성
+    const r = await getRedis();
+    await r.hSet(`battle:session:${sessionId}`, {
+      state: 'WAITING',
+      hostId,
+      roomCode,
+      roundCurrent: '1',
+      roundTotal: '5',
+      roundEndsAt: '',
+    });
+
+    await r.expire(`battle:session:${sessionId}`, 60 * 60 * 2); // TTL 2h
+    // roomCode로 sessionId 역조회
+    await r.set(`battle:roomCode:${roomCode}`, sessionId, { EX: 60 * 60 * 2 });
 
     return res.status(201).json({
       sessionId,
@@ -132,6 +157,26 @@ router.post('/:sessionId/start', authenticateGuest, express.json(), async (req, 
       return res.status(500).json({ message: 'Failed to update session' });
     }
 
+    // WS용 라운드 타이머 필드 반영
+    const r = await getRedis();
+    await r.hSet(`battle:session:${sessionId}`, {
+      state: 'WAITING',
+      roundCurrent: String(session.round?.current ?? 1),
+      roundTotal: String(session.round?.total ?? 5),
+      roundEndsAt: '',
+    });
+
+    // 라운드별 정답 저장
+    for (let i = 0; i < questions.length; i++) {
+      const roundNo = i + 1;
+      const q = questions[i];
+      const rawAnswer = q.correctSentence ?? q.answer ?? q.text ?? '';
+      await r.hSet(`battle:session:${sessionId}:round:${roundNo}`, {
+        answer: normalizeText(rawAnswer),
+      });
+      await r.expire(`battle:session:${sessionId}:round:${roundNo}`, 60 * 60 * 2);
+    }
+
     // 카운트다운 끝나면 playing으로 전환
     setTimeout(async () => {
       try {
@@ -143,9 +188,24 @@ router.post('/:sessionId/start', authenticateGuest, express.json(), async (req, 
           status: 'playing',
           startedAt: new Date().toISOString(),
           countdown: { ...cur.countdown, inProgress: false },
-          // 1 라운드 시작과 동시에 30초 제한
+          // 1 라운드 시작과 동시에 제한
           deadlineAt: Date.now() + PER_ROUND_MS,
         });
+
+        const r = await getRedis();
+        await r.hSet(`battle:session:${sessionId}`, {
+          state: 'PLAYING',
+          roundEndsAt: String(Date.now() + PER_ROUND_MS),
+        });
+
+        // 라운드 시작 알림
+        const io = req.app.locals.io;
+        if (io) {
+          io.to(ROOM(sessionId)).emit('battle:round:next', {
+            round: { current: 1, total: 5 },
+            remainingSec: Math.ceil(PER_ROUND_MS / 1000),
+          });
+        }
       } catch (e) {
         console.error(`[COUNTDOWN -> PLAYING] failed for ${sessionId}:`, e);
       }
@@ -244,7 +304,7 @@ router.post('/entry', authenticateGuest, express.json(), async (req, res) => {
           patched.players.map((p) => `${p.playerId}${p.isHost ? '(host)' : ''}`).join(', '),
         );
 
-        io.to(sessionId).emit('battle:player_joined', {
+        io.to(ROOM(sessionId)).emit('battle:player_joined', {
           sessionId,
           roomCode: patched.roomCode,
           players: patched.players,
@@ -284,7 +344,7 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     const base = await getSessionBasicForPlay(sessionId);
     if (!base) return res.status(404).json({ message: 'Session not found or expired' });
 
-    const { status, roomCode, round: sessRound, hostId, correctAnswer, deadlineAt } = base;
+    const { status, roomCode, round: sessRound, correctAnswer, deadlineAt } = base;
     if (status !== 'playing') {
       return res.status(409).json({ message: 'Session is not in playing state' });
     }
@@ -303,8 +363,26 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
       const hasNext = !moved?.ended && currentRound < totalRounds;
       const nextRoundNumber = Math.min(currentRound + 1, totalRounds);
 
+      // Redis 라운드/타이머 갱신
+      try {
+        const r = await getRedis();
+        if (moved?.ended) {
+          await r.hSet(`battle:session:${sessionId}`, {
+            state: 'ENDED',
+            roundEndsAt: '',
+          });
+        } else {
+          await r.hSet(`battle:session:${sessionId}`, {
+            roundCurrent: String(nextRoundNumber),
+            roundEndsAt: String(Date.now() + PER_ROUND_MS),
+          });
+        }
+      } catch (e) {
+        console.warn('[WS] round timeout redis update failed:', e?.message || e);
+      }
+
       return res.status(201).json({
-        round: { current: nextRoundNumber, total: totalRounds }, 
+        round: { current: nextRoundNumber, total: totalRounds },
         next: { hasNext },
         sessionId,
         roomCode,
@@ -324,7 +402,7 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
       const hasNext = currentRound < totalRounds;
       const nextRoundNumber = Math.min(currentRound + 1, totalRounds);
       return res.status(201).json({
-        round: { current: nextRoundNumber, total: totalRounds }, 
+        round: { current: nextRoundNumber, total: totalRounds },
         next: { hasNext },
         sessionId,
         roomCode,
@@ -335,14 +413,12 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
       });
     }
 
-    // 정답 판정
-    const normalize = (s) => String(s || '').trim();
-    const isCorrect = normalize(answer) === normalize(correctAnswer);
+    const isCorrect = normalizeText(answer) === normalizeText(correctAnswer);
 
     if (!isCorrect) {
       // 오답이면 라운드 유지
       return res.status(201).json({
-        round: { current: currentRound, total: totalRounds }, 
+        round: { current: currentRound, total: totalRounds },
         next: { hasNext: false },
         sessionId,
         roomCode,
@@ -376,6 +452,24 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     const moved = await advanceRoundOrEnd(sessionId, { perRoundMs: PER_ROUND_MS });
     const hasNext = !moved?.ended && currentRound < totalRounds;
     const nextRoundNumber = Math.min(currentRound + 1, totalRounds);
+
+    // Redis의 라운드/타이머도 갱신
+    try {
+      const r = await getRedis();
+      if (moved?.ended) {
+        await r.hSet(`battle:session:${sessionId}`, {
+          state: 'ENDED',
+          roundEndsAt: '',
+        });
+      } else {
+        await r.hSet(`battle:session:${sessionId}`, {
+          roundCurrent: String(nextRoundNumber),
+          roundEndsAt: String(Date.now() + PER_ROUND_MS),
+        });
+      }
+    } catch (e) {
+      console.warn('[WS] round advance redis update failed:', e?.message || e);
+    }
 
     return res.status(201).json({
       round: { current: nextRoundNumber, total: totalRounds },
