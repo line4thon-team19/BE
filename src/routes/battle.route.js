@@ -497,28 +497,23 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     const session = await getSession(sessionId);
     if (!session) return res.status(404).json({ message: 'Session not found or expired' });
 
-    // 플레이어 목록 확보 (host + players 배열 기준)
+    // 플레이어 목록
     let players = Array.isArray(session.players) ? session.players.slice() : [];
     if (!players.length && session.hostId) {
       players = [{ playerId: session.hostId, isHost: true }];
     }
-    // 게스트가 players에 없고 session.guestId가 있으면 보강
     if (session.guestId && !players.some((p) => p.playerId === session.guestId)) {
       players.push({ playerId: session.guestId, isHost: false });
     }
-    // 최소 1명은 있어야 함
     if (!players.length) {
       return res.status(404).json({ message: 'Players not found in session' });
     }
 
-    // 총 라운드 수 & 문제 목록에서 questionId 추출
     const totalRounds = Number(session?.round?.total || session?.questions?.length || 0 || 5);
 
-    // 점수 해시 읽기 (keys.battleScore)
-    const scoreMap = await getScores(sessionId); // { playerId: scoreString }
+    const scoreMap = await getScores(sessionId);
     const scoreById = (pid) => Number(scoreMap[pid] ?? 0);
 
-    // summary 계산 (wrong은 "총라운드 - 점수"로 정의)
     const summary = players.map((p) => {
       const score = scoreById(p.playerId);
       return {
@@ -529,16 +524,13 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
       };
     });
 
-    // 라운드 상세
     const rounds = [];
     for (let r = 1; r <= totalRounds; r++) {
-      // start에서 세팅한 questions 배열 기준으로 id 추출 (없으면 null)
       const questionId = session?.questions?.[r - 1]?.id ?? null;
 
-      // 승자는 Redis key(battleRoundWinner)에서 조회
       const winner = await getRoundWinner(sessionId, r);
 
-      // isCorrect: 단일 정답 선점 모델이므로 승자만 true, 나머지는 false로 둠
+      // isCorrect: 단일 정답 선점 모델이므로 승자만 true, 나머지는 false
       const playersResult = players.map((p) => ({
         playerId: p.playerId,
         isCorrect: winner ? p.playerId === winner : false,
@@ -547,7 +539,7 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
       rounds.push({ round: r, questionId, winner: winner || null, players: playersResult });
     }
 
-    // 최종 승자/패자 계산 (점수 → 라운드승수 순)
+    // 최종 승자/패자 계산
     const host = summary.find((s) => s.isHost);
     const guest = summary.find((s) => !s.isHost);
     let winnerPlayerId = null;
@@ -561,19 +553,19 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
         if (hostWins !== guestWins) {
           winnerPlayerId = hostWins > guestWins ? host.playerId : guest.playerId;
         } else {
-          winnerPlayerId = null; // 완전 무승부
+          winnerPlayerId = null;
         }
       }
     }
 
-    let result = null; // you 기준
+    let result = null;
     if (you && winnerPlayerId) {
       result = you === winnerPlayerId ? 'win' : 'lose';
     }
 
     return res.status(200).json({
-      state: (session.status || 'ended').toUpperCase(), // WAITING/PLAYING/ENDED 중 하나
-      result, // win | lose | null
+      state: (session.status || 'ended').toUpperCase(), // WAITING/PLAYING/ENDED
+      result,
       summary,
       rounds,
     });

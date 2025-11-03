@@ -144,11 +144,11 @@ async function advanceRoundOrEnd(sessionId, { perRoundMs = 0 } = {}) {
   return { advanced: false, ended: true, nextState: 'ended', nextRound: tot };
 }
 
-/** 점수 해시 읽기: HGETALL battle:score:{sessionId} -> { playerId: "3", ... } */
+// 세션별 점수 조회
 async function getScores(sessionId) {
   const redis = await getRedis();
   const h = await redis.hGetAll(keys.battleScore(sessionId));
-  return h || {}; // 빈 객체
+  return h || {};
 }
 
 module.exports = {
