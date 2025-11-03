@@ -99,7 +99,7 @@ async function getRoundWinner(sessionId, round) {
 async function claimRoundWinner(sessionId, round, playerId) {
   const redis = await getRedis();
   const key = keys.battleRoundWinner(sessionId, round);
-  const ok = await redis.setNX(key, playerId); 
+  const ok = await redis.setNX(key, playerId);
   if (ok) await redis.pExpire(key, 2 * 60 * 1000);
   return !!ok;
 }
@@ -144,6 +144,13 @@ async function advanceRoundOrEnd(sessionId, { perRoundMs = 0 } = {}) {
   return { advanced: false, ended: true, nextState: 'ended', nextRound: tot };
 }
 
+// 세션별 점수 조회
+async function getScores(sessionId) {
+  const redis = await getRedis();
+  const h = await redis.hGetAll(keys.battleScore(sessionId));
+  return h || {};
+}
+
 module.exports = {
   existsRoomCode,
   createSession,
@@ -156,4 +163,5 @@ module.exports = {
   claimRoundWinner,
   addScore,
   advanceRoundOrEnd,
+  getScores,
 };

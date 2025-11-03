@@ -265,3 +265,56 @@ paths:
         '404': { $ref: '../components/responses.yaml#/NotFound' }
         '409': { $ref: '../components/responses.yaml#/Conflict' }
         '500': { $ref: '../components/responses.yaml#/ServerError' }
+
+  /api/battle/{sessionId}/result:
+    get:
+      tags: [Battle]
+      summary: 배틀룸 결과 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, example: b_9p1v4t }
+      responses:
+        '200':
+          description: Battle result fetched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: { type: string, example: ENDED }
+                  result:
+                    type: string
+                    enum: [win, lose, null]
+                    nullable: true
+                    example: win
+                  summary:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        playerId: { type: string, example: plr_host }
+                        isHost: { type: boolean, example: true }
+                        score: { type: integer, example: 3 }
+                        wrong: { type: integer, example: 2 }
+                  rounds:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        round: { type: integer, example: 1 }
+                        questionId: { type: string, nullable: true, example: q_001 }
+                        winner: { type: string, nullable: true, example: plr_guest }
+                        players:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              playerId: { type: string, example: plr_guest }
+                              isCorrect: { type: boolean, example: true }
+        '401': { $ref: '../components/responses.yaml#/Unauthorized' }
+        '404': { $ref: '../components/responses.yaml#/NotFound' }
+        '500': { $ref: '../components/responses.yaml#/ServerError' }

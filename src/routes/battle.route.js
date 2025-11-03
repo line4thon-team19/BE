@@ -13,6 +13,7 @@ const {
   claimRoundWinner,
   addScore,
   advanceRoundOrEnd,
+  getScores,
 } = require('../repositories/battleSessionRepo');
 const { getRandomBattleQuestions } = require('../repositories/battleQuestionRepo');
 const { getRedis } = require('../libs/redisClient');
@@ -483,6 +484,93 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     });
   } catch (err) {
     console.error('[POST /api/battle/:sessionId/answer] error:', err);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+/** 배틀 결과 조회 */
+router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const you = req.user?.playerId || null;
+
+    const session = await getSession(sessionId);
+    if (!session) return res.status(404).json({ message: 'Session not found or expired' });
+
+    // 플레이어 목록
+    let players = Array.isArray(session.players) ? session.players.slice() : [];
+    if (!players.length && session.hostId) {
+      players = [{ playerId: session.hostId, isHost: true }];
+    }
+    if (session.guestId && !players.some((p) => p.playerId === session.guestId)) {
+      players.push({ playerId: session.guestId, isHost: false });
+    }
+    if (!players.length) {
+      return res.status(404).json({ message: 'Players not found in session' });
+    }
+
+    const totalRounds = Number(session?.round?.total || session?.questions?.length || 0 || 5);
+
+    const scoreMap = await getScores(sessionId);
+    const scoreById = (pid) => Number(scoreMap[pid] ?? 0);
+
+    const summary = players.map((p) => {
+      const score = scoreById(p.playerId);
+      return {
+        playerId: p.playerId,
+        isHost: !!p.isHost,
+        score,
+        wrong: Math.max(totalRounds - score, 0),
+      };
+    });
+
+    const rounds = [];
+    for (let r = 1; r <= totalRounds; r++) {
+      const questionId = session?.questions?.[r - 1]?.id ?? null;
+
+      const winner = await getRoundWinner(sessionId, r);
+
+      // isCorrect: 단일 정답 선점 모델이므로 승자만 true, 나머지는 false
+      const playersResult = players.map((p) => ({
+        playerId: p.playerId,
+        isCorrect: winner ? p.playerId === winner : false,
+      }));
+
+      rounds.push({ round: r, questionId, winner: winner || null, players: playersResult });
+    }
+
+    // 최종 승자/패자 계산
+    const host = summary.find((s) => s.isHost);
+    const guest = summary.find((s) => !s.isHost);
+    let winnerPlayerId = null;
+
+    if (host && guest) {
+      if (host.score !== guest.score) {
+        winnerPlayerId = host.score > guest.score ? host.playerId : guest.playerId;
+      } else {
+        const hostWins = rounds.filter((rd) => rd.winner === host.playerId).length;
+        const guestWins = rounds.filter((rd) => rd.winner === guest.playerId).length;
+        if (hostWins !== guestWins) {
+          winnerPlayerId = hostWins > guestWins ? host.playerId : guest.playerId;
+        } else {
+          winnerPlayerId = null;
+        }
+      }
+    }
+
+    let result = null;
+    if (you && winnerPlayerId) {
+      result = you === winnerPlayerId ? 'win' : 'lose';
+    }
+
+    return res.status(200).json({
+      state: (session.status || 'ended').toUpperCase(), // WAITING/PLAYING/ENDED
+      result,
+      summary,
+      rounds,
+    });
+  } catch (err) {
+    console.error('[GET /api/battle/:sessionId/result] error:', err);
     return res.status(500).json({ message: 'Internal Server Error' });
   }
 });
