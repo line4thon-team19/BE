@@ -21,12 +21,45 @@ function calcCountdown(sess) {
 function calcRemaining(sess) {
   const lim = Number(sess?.timeLimit);
   if (!Number.isFinite(lim) || lim <= 0) return null;
+
   const started = Number(sess?.roundStartedAt);
-  if (!Number.isFinite(started) || started <= 0) return lim; // 아직 시작 X 
-  const elapsed = Math.floor((Date.now() - started) / 1000);
+  if (!Number.isFinite(started) || started <= 0) return lim;
+
+  const now = Date.now();
+  if (now < started) return lim;
+
+  const elapsed = Math.floor((now - started) / 1000);
   return Math.max(0, lim - elapsed);
 }
 
+//timeout을 오답으로 기록(중복기록 방지)
+function recordTimeout(sess) {
+  const current = Number(sess.round?.current ?? 1);
+  const idx = current - 1;
+  const q = sess.questions?.[idx];
+  if (!q) return { isLast: true };
+
+  const already =
+    Array.isArray(sess.answers) && sess.answers.some((a) => a.round === current);
+  if (!already) {
+    sess.answers = Array.isArray(sess.answers) ? sess.answers : [];
+    sess.answers.push({
+      round: current,
+      questionId: q.id,
+      answer: 'timeout',         // 구분용 태그
+      correct: false,
+      reason: 'timeout',         // 결과 조회에서 표시할 때 사용 가능
+      answeredAt: new Date().toISOString(),
+    });
+    sess.wrongCount = (sess.wrongCount ?? 0) + 1;
+  }
+
+  const total = Number(sess.round?.total ?? (sess.questions?.length || 0));
+  const isLast = current >= total;
+  return { isLast };
+}
+
+/* --------------------------------- 시작 --------------------------------- */
 router.post('/start', authenticateGuest, express.json(), async (req, res) => {
   try {
     const pool = await getMysql();
@@ -150,12 +183,51 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     const q = sess.questions?.[idx];
     if (!q) return res.status(409).json({ message: 'Round index out of range' });
 
-    const already = Array.isArray(sess.answers) && sess.answers.some((a) => a.round === serverCurrent);
+    // 시간 만료시: 제출값 무시하고 시간초과로 처리 후 바로 다음 라운드 시작
+    const remainingTime = calcRemaining(sess);
+    if (remainingTime === 0) {
+      const { isLast } = recordTimeout(sess);
+
+      if (isLast) {
+        sess.state = 'ENDED';
+        await savePracticeSession(sess);
+        return res.json({
+          state: 'ENDED',
+          round: { current: serverCurrent, total },
+          result: 'timeout',
+          next: { hasNext: false },
+        });
+      }
+
+      // 다음 라운드로 이동 & 타이머 즉시 시작
+      sess.round.current = serverCurrent + 1;
+      sess.roundStartedAt = Date.now();
+      sess.countdownEndAt = null;
+
+      const nq = sess.questions[sess.round.current - 1];
+      await savePracticeSession(sess);
+
+      return res.json({
+        round: { current: sess.round.current, total },
+        next: {
+          hasNext: true,
+          result: 'timeout',
+          question: {
+            questionId: String(nq.id),
+            text: nq.text,
+            options: [nq.choice1, nq.choice2],
+          },
+        },
+      });
+    }
+
+    // 정상 제출
+    const already =
+      Array.isArray(sess.answers) && sess.answers.some((a) => a.round === serverCurrent);
     if (already) return res.status(409).json({ message: 'Already answered this round' });
 
     const isCorrect = answer === q.answerLabel;
 
-    // 진행 기록 업데이트
     sess.answers = Array.isArray(sess.answers) ? sess.answers : [];
     sess.answers.push({
       round: serverCurrent,
@@ -181,11 +253,9 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
       });
     }
 
-    // 다음 라운드로 이동
+    // 다음 라운드로 이동 & 타이머 즉시 시작
     sess.round.current = serverCurrent + 1;
-    // 남은 시간은 저장하지 않고, 시작 시각만 갱신
     sess.roundStartedAt = Date.now();
-    // 라운드 중 카운트다운은 사용 안 하므로 초기화
     sess.countdownEndAt = null;
 
     const nq = sess.questions[sess.round.current - 1];
@@ -217,29 +287,31 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     const sess = await getPracticeSession(sessionId);
     if (!sess) return res.status(404).json({ message: 'Session not found or expired' });
 
-    // 본인 세션만 허용
     if (sess.guestId && sess.guestId !== req.user.playerId) {
       return res.status(403).json({ message: 'Forbidden' });
     }
-
     if (sess.state !== 'ENDED') {
       return res.status(409).json({ message: 'Not ended yet' });
     }
 
     const totalRounds = sess.round?.total ?? (sess.questions?.length || 0);
-
     const answers = Array.isArray(sess.answers) ? sess.answers : [];
+
     const rows = answers.map((a) => {
       const q = (sess.questions || []).find((x) => x.id === a.questionId);
-      const correctText = q ? q[q.answerLabel] : undefined;
-      const pickedText = q ? q[a.answer] : undefined;
+      const correctText = q ? q[q.answerLabel] : null;
+      const pickedText  = q ? q[a.answer]      : null;
+
+      const isTimeout = a.reason === 'timeout';
+      const result = isTimeout ? 'timeout' : (a.correct ? 'correct' : 'wrong');
+      const answerForResponse = isTimeout ? null : pickedText; // timeout이면 null
 
       return {
         round: a.round,
         question: q ? q.text : '',
-        answer: pickedText,
-        result: a.correct ? 'correct' : 'wrong',
-        correctAnswer: correctText ?? null,
+        answer: answerForResponse,
+        result,
+        correctAnswer: correctText,
         explanation: q?.explanation ?? null,
       };
     });
@@ -264,19 +336,48 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
 
     const sess = await getPracticeSession(sessionId);
     if (!sess) return res.status(404).json({ message: 'Session not found or expired' });
-
-    // 본인 세션 보호
     if (sess.guestId && sess.guestId !== req.user.playerId) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
     const total = Number(sess.round?.total ?? (sess.questions?.length || 0));
-    const current = Number(sess.round?.current ?? 1);
+    let current = Number(sess.round?.current ?? 1);
 
-    const countdown = calcCountdown(sess);
-    const remainingTime = calcRemaining(sess);
+    // 최초 계산
+    let countdown = calcCountdown(sess);
+    let remainingTime = calcRemaining(sess);
 
-    // ENDED
+    // 자동 타임아웃 처리 (조회 시점)
+    if (!countdown && sess.state === 'PLAYING' && remainingTime === 0) {
+      const { isLast } = recordTimeout(sess);
+
+      if (isLast) {
+        sess.state = 'ENDED';
+        await savePracticeSession(sess);
+        return res.json({
+          sessionId: sess.sessionId,
+          state: 'ENDED',
+          round: { current, total },
+          score: sess.score ?? 0,
+          wrongCount: sess.wrongCount ?? 0,
+          totalRounds: total,
+        });
+      }
+
+      // 다음 라운드로 이동 + 타이머 즉시 시작
+      sess.round.current = current + 1;
+      sess.roundStartedAt = Date.now();
+      sess.countdownEndAt = null;
+      await savePracticeSession(sess);
+
+      // 현재 라운드/타이머 값 갱신
+      current = sess.round.current;
+
+      countdown = calcCountdown(sess);      // 보통 null(라운드 중 카운트다운 없음)
+      remainingTime = calcRemaining(sess);  // 새 라운드의 full timeLimit로 갱신됨
+    }
+
+    // ENDED 응답
     if (sess.state === 'ENDED') {
       return res.json({
         sessionId: sess.sessionId,
@@ -288,11 +389,10 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
       });
     }
 
-    // PLAYING
+    // PLAYING 응답
     const idx = Math.max(0, current - 1);
     const q = (sess.questions || [])[idx];
 
-    // 카운트다운 중이면 문제 표출 X
     if (countdown) {
       return res.json({
         sessionId: sess.sessionId,
@@ -300,18 +400,13 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
         countdown,
         round: { current, total },
         timeLimit: sess.timeLimit ?? null,
-        remainingTime, // 계산값
+        remainingTime, // 재계산된 값
         answeredCount: Array.isArray(sess.answers) ? sess.answers.length : 0,
       });
     }
 
-    // 카운트다운 종료 후: 현재 문제 1개만 노출(정답/해설 제외)
     const currentQuestion = q
-      ? {
-          questionId: String(q.id),
-          text: q.text,
-          options: [q.choice1, q.choice2],
-        }
+      ? { questionId: String(q.id), text: q.text, options: [q.choice1, q.choice2] }
       : null;
 
     return res.json({
@@ -319,7 +414,7 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
       state: 'PLAYING',
       round: { current, total },
       timeLimit: sess.timeLimit ?? null,
-      remainingTime, 
+      remainingTime, // 재계산된 값
       answeredCount: Array.isArray(sess.answers) ? sess.answers.length : 0,
       question: currentQuestion,
     });

@@ -73,7 +73,7 @@ PracticeAnswerNext:
       type: object
       properties:
         hasNext: { type: boolean, example: true }
-        result:  { type: string, enum: [correct, wrong], example: correct }
+        result:  { type: string, enum: [correct, wrong, timeout], example: correct }
         question: { $ref: '#/PracticeQuestionPublic' }
       required: [hasNext, result, question]
   required: [round, next]
@@ -83,7 +83,7 @@ PracticeAnswerEnd:
   properties:
     state: { type: string, enum: [ENDED], example: ENDED }
     round: { $ref: '#/PracticeRound' }
-    result: { type: string, enum: [correct, wrong], example: wrong }
+    result: { type: string, enum: [correct, wrong, timeout], example: wrong }
     next:
       type: object
       properties:
@@ -97,10 +97,10 @@ PracticeResultRow:
     round:         { type: integer, example: 3 }
     question:      { type: string,  example: "그는 (   ) 운동을 했다." }
     answer:        { type: string,  example: "열심히" }
-    result:        { type: string,  enum: [correct, wrong], example: correct }
+    result:        { type: string,  enum: [correct, wrong, timeout], example: correct }
     correctAnswer: { type: string,  example: "한 번", nullable: true }
     explanation:   { type: string,  example: "수량/횟수일 때는 '한 번'을 씁니다.", nullable: true }
-  required: [round, question, answer, result]
+  required: [round, question, result]
 
 PracticeResultResponse:
   type: object
