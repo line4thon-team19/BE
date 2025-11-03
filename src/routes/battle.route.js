@@ -1,6 +1,7 @@
 const express = require('express');
 const authenticateGuest = require('../middlewares/auth');
 const { genRoomCode, newBattleSessionId } = require('../utils/id');
+const keys = require('../utils/keys');
 const {
   existsRoomCode,
   createSession,
@@ -75,7 +76,7 @@ router.post('/rooms', authenticateGuest, async (req, res) => {
 
     //  WS가 읽을 Redis 키 생성
     const r = await getRedis();
-    await r.hSet(`battle:session:${sessionId}`, {
+    await r.hSet(keys.battleSessionState(sessionId), {
       state: 'WAITING',
       hostId,
       roomCode,
@@ -84,9 +85,9 @@ router.post('/rooms', authenticateGuest, async (req, res) => {
       roundEndsAt: '',
     });
 
-    await r.expire(`battle:session:${sessionId}`, 60 * 60 * 2); // TTL 2h
+    await r.expire(keys.battleSessionState(sessionId), 60 * 60 * 2); // TTL 2h
     // roomCode로 sessionId 역조회
-    await r.set(`battle:roomCode:${roomCode}`, sessionId, { EX: 60 * 60 * 2 });
+    await r.set(keys.battleRoomCode(roomCode), sessionId, { EX: 60 * 60 * 2 });
 
     return res.status(201).json({
       sessionId,
@@ -160,7 +161,7 @@ router.post('/:sessionId/start', authenticateGuest, express.json(), async (req, 
 
     // WS용 라운드 타이머 필드 반영
     const r = await getRedis();
-    await r.hSet(`battle:session:${sessionId}`, {
+    await r.hSet(keys.battleSessionState(sessionId), {
       state: 'WAITING',
       roundCurrent: String(session.round?.current ?? 1),
       roundTotal: String(session.round?.total ?? 5),
@@ -172,10 +173,10 @@ router.post('/:sessionId/start', authenticateGuest, express.json(), async (req, 
       const roundNo = i + 1;
       const q = questions[i];
       const rawAnswer = q.correctSentence ?? q.answer ?? q.text ?? '';
-      await r.hSet(`battle:session:${sessionId}:round:${roundNo}`, {
+      await r.hSet(keys.battleRoundAnswer(sessionId, roundNo), {
         answer: normalizeText(rawAnswer),
       });
-      await r.expire(`battle:session:${sessionId}:round:${roundNo}`, 60 * 60 * 2);
+      await r.expire(keys.battleRoundAnswer(sessionId, roundNo), 60 * 60 * 2);
     }
 
     // 카운트다운 끝나면 playing으로 전환
@@ -194,7 +195,7 @@ router.post('/:sessionId/start', authenticateGuest, express.json(), async (req, 
         });
 
         const r = await getRedis();
-        await r.hSet(`battle:session:${sessionId}`, {
+        await r.hSet(keys.battleSessionState(sessionId), {
           state: 'PLAYING',
           roundEndsAt: String(Date.now() + PER_ROUND_MS),
         });
@@ -368,12 +369,12 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
       try {
         const r = await getRedis();
         if (moved?.ended) {
-          await r.hSet(`battle:session:${sessionId}`, {
+          await r.hSet(keys.battleSessionState(sessionId), {
             state: 'ENDED',
             roundEndsAt: '',
           });
         } else {
-          await r.hSet(`battle:session:${sessionId}`, {
+          await r.hSet(keys.battleSessionState(sessionId), {
             roundCurrent: String(nextRoundNumber),
             roundEndsAt: String(Date.now() + PER_ROUND_MS),
           });
@@ -458,12 +459,9 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     try {
       const r = await getRedis();
       if (moved?.ended) {
-        await r.hSet(`battle:session:${sessionId}`, {
-          state: 'ENDED',
-          roundEndsAt: '',
-        });
+        await r.hSet(keys.battleSessionState(sessionId), { state: 'ENDED', roundEndsAt: '' });
       } else {
-        await r.hSet(`battle:session:${sessionId}`, {
+        await r.hSet(keys.battleSessionState(sessionId), {
           roundCurrent: String(nextRoundNumber),
           roundEndsAt: String(Date.now() + PER_ROUND_MS),
         });

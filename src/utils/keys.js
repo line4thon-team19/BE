@@ -3,7 +3,10 @@ const PFX = RAW ? `${RAW}:` : '';
 
 /* Battle Mode Keys */
 function battleSession(sessionId) {
-  return `${PFX}battle:session:${sessionId}`;
+  return `${PFX}battle:session:${sessionId}`; // 세션 전체 정보(JSON)
+}
+function battleSessionState(sessionId) {
+  return `${PFX}battle:session:state:${sessionId}`; // 실시간 상태 정보(HASH)
 }
 function battleRoomCode(roomCode) {
   return `${PFX}battle:roomcode:${roomCode}`;
@@ -11,8 +14,8 @@ function battleRoomCode(roomCode) {
 function battleRoundWinner(sessionId, round) {
   return `${PFX}battle:session:${sessionId}:round:${round}:winner`;
 }
-function battleAnswerHash(sessionId, round, playerId) {
-  return `${PFX}battle:session:${sessionId}:answers:${round}:${playerId}`;
+function battleRoundAnswer(sessionId, round) {
+  return `${PFX}battle:session:${sessionId}:round:${round}`;
 }
 function battleScore(sessionId) {
   return `${PFX}battle:session:${sessionId}:score`;
@@ -25,9 +28,10 @@ function practiceSession(sessionId) {
 
 module.exports = {
   battleSession,
+  battleSessionState,
   battleRoomCode,
   battleRoundWinner,
-  battleAnswerHash,
+  battleRoundAnswer,
   battleScore,
   practiceSession,
 };
