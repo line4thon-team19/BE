@@ -18,33 +18,72 @@ const { normalizeText, rateLimiter } = require('./utils');
 const ROOM = (sessionId) => `battle:room:${sessionId}`;
 
 const roundTickerMap = new Map();
+const PER_ROUND_MS = 30_000;
+
+async function makeSnapshot(sessionId) {
+  const sess = await getSession(sessionId);
+  if (!sess) throw new Error('Session not found');
+
+  const status = String(sess.status || 'ENDED').toUpperCase();
+  const round = sess.round || { current: 1, total: 5 };
+
+  let remainingTime = 0;
+  try {
+    const t = await tickRemainingSec(sessionId);
+    if (t && typeof t.remainingSec === 'number') remainingTime = Math.max(0, t.remainingSec);
+  } catch {
+    /* ignore tickRemainingSec error */
+  }
+
+  const summary = await getScoreSummary(sessionId);
+
+  let question = null;
+  if (status === 'PLAYING' && Array.isArray(sess.questions)) {
+    const idx = Math.max(0, Number(round.current || 1) - 1);
+    const q = sess.questions[idx];
+    if (q) {
+      const questionId = q.questionId ?? q.id ?? (typeof q.id === 'number' ? String(q.id) : null);
+      const text = q.text ?? q.correctSentence ?? q.answer ?? null;
+      if (questionId && text) question = { questionId, text };
+    }
+  }
+
+  return {
+    status,
+    hostId: sess.hostId || null,
+    round: { current: Number(round.current || 1), total: Number(round.total || 5) },
+    question,
+    summary,
+    remainingTime,
+  };
+}
 
 function startRoundTicker(io, sessionId) {
   if (roundTickerMap.has(sessionId)) return;
 
+  console.log(`[TICKER] START for ${sessionId}`);
+
   const intervalId = setInterval(async () => {
-    const { remainingSec, round } = await tickRemainingSec(sessionId);
+    try {
+      const { remainingSec, round } = await tickRemainingSec(sessionId);
+      console.log('[TICK]', sessionId, remainingSec, round.current);
+      if (remainingSec === null || remainingSec === undefined) return;
 
-    if (remainingSec === null || remainingSec === undefined) return;
-
-    if (remainingSec < 0) {
-      try {
+      if (remainingSec <= 0) {
         const handled = await tryHandleTimeoutOnce(sessionId, round.current);
         if (handled) {
           await advanceRoundWS(io, sessionId);
+          const snap = await makeSnapshot(sessionId);
+          io.to(ROOM(sessionId)).emit('battle:snapshot', snap);
         }
-      } catch (e) {
-        console.warn('[ticker] timeout advance failed:', e?.message || e);
+        io.to(ROOM(sessionId)).emit('battle:round:ticker', { round, remainingSec: 0 });
+        return;
       }
 
-      io.to(ROOM(sessionId)).emit('battle:round:ticker', { round, remainingSec: 0 });
-      return;
+      io.to(ROOM(sessionId)).emit('battle:round:ticker', { round, remainingSec });
+    } catch (e) {
+      console.warn('[ticker] error:', e?.message || e);
     }
-
-    io.to(ROOM(sessionId)).emit('battle:round:ticker', {
-      round,
-      remainingSec,
-    });
   }, 1000);
 
   roundTickerMap.set(sessionId, intervalId);
@@ -59,13 +98,14 @@ function stopRoundTicker(sessionId) {
 }
 
 // 라운드 전환
-async function advanceRoundWS(io, sessionId, perRoundMs = 30_000) {
+async function advanceRoundWS(io, sessionId, perRoundMs = PER_ROUND_MS) {
   const meta = await getRoundMeta(sessionId);
   const next = meta.current + 1;
 
   if (next > meta.total) {
     await setEnded(sessionId);
     io.to(ROOM(sessionId)).emit('battle:round:end', { state: 'ENDED' });
+    stopRoundTicker(sessionId);
     return { ended: true };
   }
 
@@ -84,13 +124,19 @@ function register(io, socket) {
       const { sessionId } = payload || {};
       if (!sessionId) throw new Error('sessionId required');
 
-      const sess = await getSession(sessionId);
-      if (!sess) throw new Error('Session not found');
-
       await socket.join(ROOM(sessionId));
-      if (cb) cb({ ok: true, you: { playerId: socket.data.playerId } });
+
+      const snap = await makeSnapshot(sessionId);
+      socket.emit('battle:snapshot', snap);
+
+      // 다른 참가자에게 누가 들어왔는지 알림
+      socket.to(ROOM(sessionId)).emit('battle:player_joined', {
+        playerId: socket.data.playerId,
+        ts: Date.now(),
+      });
 
       startRoundTicker(io, sessionId);
+      if (cb) cb({ ok: true, you: { playerId: socket.data.playerId } });
     } catch (err) {
       if (cb) cb({ ok: false, message: err.message });
     }
@@ -130,8 +176,9 @@ function register(io, socket) {
   socket.on('battle:answer:submit', async (payload = {}, cb) => {
     try {
       const { sessionId, round, answerText = '' } = payload;
-      if (!sessionId || typeof round !== 'number') throw new Error('Bad payload');
-
+      if (!sessionId || typeof round !== 'number' || !answerText.trim()) {
+        throw new Error('Bad payload');
+      }
       const active = await isRoundActive(sessionId, round);
       if (!active) throw new Error('Round not active');
 
@@ -162,10 +209,14 @@ function register(io, socket) {
         // 정답을 맞추면 잠깐 보여준 뒤 다음 라운드로 전환
         try {
           await setCorrectFlag(sessionId, round);
-          setTimeout(() => {
-            advanceRoundWS(io, sessionId).catch((e) => {
-              console.warn('[answer] advance on correct failed:', e?.message || e);
-            });
+          setTimeout(async () => {
+            try {
+              await advanceRoundWS(io, sessionId);
+              const snap = await makeSnapshot(sessionId);
+              io.to(ROOM(sessionId)).emit('battle:snapshot', snap);
+            } catch (e) {
+              console.warn('[answer->advance] failed:', e?.message || e);
+            }
           }, 900);
         } catch (e) {
           console.warn('[answer] setCorrectFlag failed:', e?.message || e);

@@ -23,6 +23,8 @@ paths:
     $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1answer'
   /api/battle/{sessionId}/result:
     $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1result'
+  /api/battle/{sessionId}:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}'
 
   # 연습모드
   /api/practice/start:

@@ -318,3 +318,71 @@ paths:
         '401': { $ref: '../components/responses.yaml#/Unauthorized' }
         '404': { $ref: '../components/responses.yaml#/NotFound' }
         '500': { $ref: '../components/responses.yaml#/ServerError' }
+
+  /api/battle/{sessionId}:
+    get:
+      tags: [Battle]
+      summary: 배틀룸 조회
+      description: |
+        세션의 현재 상태와 라운드/문제/점수 요약을 조회합니다.  
+        - status는 WAITING/PLAYING/ENDED 중 하나입니다.  
+        - PLAYING일 때 현재 라운드의 문제를 포함해 반환합니다.  
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, example: b_9p1v4t }
+      responses:
+        '200':
+          description: Battle room fetched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [WAITING, PLAYING, ENDED]
+                    example: PLAYING
+                  hostId:
+                    type: string
+                    example: plr_abc123
+                  round:
+                    type: object
+                    properties:
+                      current: { type: integer, example: 4 }
+                      total: { type: integer, example: 5 }
+                    required: [current, total]
+                  question:
+                    type: object
+                    nullable: true
+                    properties:
+                      questionId: { type: string, example: q_002 }
+                      text: { type: string, example: '이 문제는 쉽게 풀 수 있습니다.' }
+                  summary:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        playerId: { type: string, example: plr_host }
+                        isHost: { type: boolean, example: true }
+                        score: { type: integer, example: 1 }
+                        wrong: { type: integer, example: 2 }
+                  remainingTime:
+                    type: integer
+                    description: 남은 시간(초). 없으면 0.
+                    example: 8
+                required: [status, hostId, round, summary, remainingTime]
+        '404':
+          description: Room Not Found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: 404_ROOM_NOT_FOUND }
+                  message: { type: string, example: Room not found }
+        '401': { $ref: '../components/responses.yaml#/Unauthorized' }
+        '500': { $ref: '../components/responses.yaml#/ServerError' }
