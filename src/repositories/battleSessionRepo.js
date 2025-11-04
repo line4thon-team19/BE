@@ -64,6 +64,15 @@ async function getSessionBasicForPlay(sessionId) {
 
   const currentRound = Number(s?.round?.current || 1);
   let correctAnswer = s.correctAnswer;
+  // Redis 라운드 해시에 저장된 정답을 우선으로 사용
+  try {
+    const redis = await getRedis();
+    const redisAns = await redis.hGet(keys.battleRoundAnswer(sessionId, currentRound), 'answer');
+    if (redisAns) correctAnswer = redisAns;
+  } catch (e) {
+    // Redis 조회 실패 시 무시하고 fallback
+  }
+  // 세션 JSON의 questions는 보조(fallback)
   if (!correctAnswer && Array.isArray(s.questions)) {
     const q = s.questions[currentRound - 1];
     if (q?.correctSentence) correctAnswer = q.correctSentence;
@@ -84,11 +93,10 @@ async function getSessionBasicForPlay(sessionId) {
 // 라운드 별 기록
 async function savePlayerAnswer(sessionId, round, playerId, answer) {
   const redis = await getRedis();
-  const key = keys.battleAnswerHash(sessionId, round, playerId);
+  const key = keys.battleRoundAnswer(sessionId, round);
   const ts = Date.now().toString();
-  await redis.hSet(key, 'lastAnswer', String(answer ?? ''));
-  await redis.hSet(key, 'lastSubmittedAt', ts);
-  await redis.pExpire(key, 10 * 60 * 1000); // 10분 보관
+  await redis.hSet(key, `lastAnswer:${playerId}`, String(answer ?? ''));
+  await redis.hSet(key, `lastSubmittedAt:${playerId}`, ts);
 }
 
 async function getRoundWinner(sessionId, round) {
