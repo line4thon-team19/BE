@@ -573,4 +573,110 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
   }
 });
 
+/** 배틀룸 조회 */
+router.get('/:sessionId', authenticateGuest, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    // 세션 기본 정보
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ code: '404_ROOM_NOT_FOUND', message: 'Room not found' });
+    }
+
+    // 플레이어 목록 정규화 (호스트/게스트)
+    let players = Array.isArray(session.players) ? session.players.slice() : [];
+    if (!players.length && session.hostId) {
+      players.push({ playerId: session.hostId, isHost: true });
+    }
+    if (session.guestId && !players.some((p) => p.playerId === session.guestId)) {
+      players.push({ playerId: session.guestId, isHost: false });
+    }
+
+    const base = await getSessionBasicForPlay(sessionId);
+    // base: { sessionId, status, roomCode, hostId, round, correctAnswer, deadlineAt }
+
+    const status = String(base?.status || session.status || 'ended').toUpperCase();
+    const hostId = base?.hostId || session.hostId || null;
+    const round = base?.round || session.round || { current: 1, total: 5 };
+
+    // 점수 해시
+    const scoreMap = await getScores(sessionId);
+    const scoreById = (pid) => Number(scoreMap?.[pid] ?? 0);
+    const totalRounds = Number(round?.total || session?.questions?.length || 5);
+
+    if (!players.length) {
+      // 플레이어 정보가 전혀 없으면 최소 호스트만 구성
+      if (hostId) players = [{ playerId: hostId, isHost: true }];
+    }
+
+    const summary = players.map((p) => {
+      const score = scoreById(p.playerId);
+      return {
+        playerId: p.playerId,
+        isHost: !!p.isHost,
+        score,
+        wrong: Math.max(totalRounds - score, 0),
+      };
+    });
+
+    // 현재 문제 (PLAYING일 때만 노출)
+    let question = null;
+    if (status === 'PLAYING') {
+      const idx = Math.max(0, Number(round.current || 1) - 1);
+      const q = Array.isArray(session.questions) ? session.questions[idx] : null;
+      if (q) {
+        const questionId = q.questionId ?? q.id ?? (typeof q.id === 'number' ? String(q.id) : null);
+        const text = q.text ?? q.correctSentence ?? q.answer ?? null;
+        if (questionId && text) {
+          question = { questionId, text };
+        }
+      }
+    }
+
+    // 남은 시간 계산
+    const now = Date.now();
+    const deadline = Number(base?.deadlineAt ?? session.deadlineAt ?? 0);
+
+    // 타임아웃 시 즉시 라운드 전진 (REST 폴링)
+    if (status === 'PLAYING' && deadline && now > deadline) {
+      try {
+        const moved = await advanceRoundOrEnd(sessionId, { perRoundMs: PER_ROUND_MS });
+        const r = await getRedis();
+
+        if (moved?.ended) {
+          // 게임 종료
+          await r.hSet(keys.battleSessionState(sessionId), { state: 'ENDED', roundEndsAt: '' });
+          round.current = Number(round.total || 5);
+        } else {
+          // 다음 라운드로 진행
+          const nextRound = Math.min(Number(round.current || 1) + 1, Number(round.total || 5));
+          await r.hSet(keys.battleSessionState(sessionId), {
+            roundCurrent: String(nextRound),
+            roundEndsAt: String(Date.now() + PER_ROUND_MS),
+          });
+          round.current = nextRound;
+        }
+      } catch (e) {
+        console.warn('[GET timeout advance] failed:', e?.message || e);
+      }
+    }
+
+    const remainingTime =
+      status === 'PLAYING' && deadline > now ? Math.ceil((deadline - now) / 1000) : 0;
+
+    return res.status(200).json({
+      status, // WAITING / PLAYING / ENDED
+      hostId,
+      round: { current: Number(round.current || 1), total: Number(round.total || totalRounds) },
+      question, // PLAYING일 때만 객체, 그 외 null
+      summary,
+      remainingTime,
+    });
+  } catch (err) {
+    console.error('[GET /api/battle/:sessionId] error:', err);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
 module.exports = router;
