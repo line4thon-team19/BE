@@ -57,7 +57,7 @@ PracticeStartResponse:
     state:     { type: string, enum: [PLAYING, ENDED], example: PLAYING }
     countdown: { $ref: '#/PracticeCountdown' }
     round:     { $ref: '#/PracticeRound' }
-    timeLimit: { type: integer, example: 10 }
+    timeLimit: { type: integer, example: 20 }
     questions:
       type: array
       minItems: 5
@@ -126,8 +126,8 @@ PracticeResumePlaying:
       required: [seconds]
       nullable: true
     round: { $ref: '#/PracticeRound' }
-    timeLimit: { type: integer, nullable: true, example: 10 }
-    remainingTime: { type: integer, nullable: true, example: 8 }
+    timeLimit: { type: integer, nullable: true, example: 20 }
+    remainingTime: { type: integer, nullable: true, example: 18 }
     answeredCount: { type: integer, example: 2 }
     question:
       allOf:
