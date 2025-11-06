@@ -33,7 +33,7 @@ function calcRemaining(sess) {
   return Math.max(0, lim - elapsed);
 }
 
-//timeout을 오답으로 기록(중복기록 방지)
+// timeout을 오답으로 기록(중복기록 방지)
 function recordTimeout(sess) {
   const current = Number(sess.round?.current ?? 1);
   const idx = current - 1;
@@ -58,6 +58,21 @@ function recordTimeout(sess) {
   const total = Number(sess.round?.total ?? (sess.questions?.length || 0));
   const isLast = current >= total;
   return { isLast };
+}
+
+// 각 라운드별 정답 여부 배열 생성: true | false | null
+function buildIsCorrectByRound(sess) {
+  const total = Number(sess.round?.total ?? (sess.questions?.length || 0));
+  const byRound = Array.from({ length: total }, () => null);
+
+  const answers = Array.isArray(sess.answers) ? sess.answers : [];
+  for (const a of answers) {
+    const r = Number(a.round);
+    if (!Number.isInteger(r) || r < 1 || r > total) continue;
+    const isTimeout = a.reason === 'timeout';
+    byRound[r - 1] = isTimeout ? false : !!a.correct;
+  }
+  return byRound;
 }
 
 /* --------------------------------- 시작 --------------------------------- */
@@ -107,7 +122,7 @@ router.post('/start', authenticateGuest, express.json(), async (req, res) => {
       state: 'PLAYING',
       countdownEndAt,
       round: { current: 1, total },
-      timeLimit,                  // 초
+      timeLimit,
       roundStartedAt: countdownEndAt ?? now, // 카운트다운 끝나면 라운드 시작
       questions: serverQuestions,
       answers: [],
@@ -348,7 +363,7 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     let countdown = calcCountdown(sess);
     let remainingTime = calcRemaining(sess);
 
-    // 자동 타임아웃 처리 (조회 시점)
+    // 자동 타임아웃 처리
     if (!countdown && sess.state === 'PLAYING' && remainingTime === 0) {
       const { isLast } = recordTimeout(sess);
 
@@ -362,6 +377,9 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
           score: sess.score ?? 0,
           wrongCount: sess.wrongCount ?? 0,
           totalRounds: total,
+          // 추가
+          wrong: sess.wrongCount ?? 0,
+          isCorrectByRound: buildIsCorrectByRound(sess),
         });
       }
 
@@ -387,6 +405,8 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
         score: sess.score ?? 0,
         wrongCount: sess.wrongCount ?? 0,
         totalRounds: total,
+        wrong: sess.wrongCount ?? 0,
+        isCorrectByRound: buildIsCorrectByRound(sess),
       });
     }
 
@@ -403,6 +423,10 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
         timeLimit: sess.timeLimit ?? null,
         remainingTime, // 재계산된 값
         answeredCount: Array.isArray(sess.answers) ? sess.answers.length : 0,
+        // 추가
+        score: sess.score ?? 0,
+        wrong: sess.wrongCount ?? 0,
+        isCorrectByRound: buildIsCorrectByRound(sess),
       });
     }
 
@@ -418,6 +442,9 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
       remainingTime, // 재계산된 값
       answeredCount: Array.isArray(sess.answers) ? sess.answers.length : 0,
       question: currentQuestion,
+      score: sess.score ?? 0,
+      wrong: sess.wrongCount ?? 0,
+      isCorrectByRound: buildIsCorrectByRound(sess),
     });
   } catch (e) {
     console.error('[GET /practice/:sessionId] error:', e);

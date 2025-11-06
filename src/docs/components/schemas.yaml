@@ -133,6 +133,15 @@ PracticeResumePlaying:
       allOf:
         - $ref: '#/PracticeQuestionPublic'
       nullable: true
+    score: { type: integer, example: 2 }
+    wrong: { type: integer, example: 1, description: 'wrongCount의 응답용 별칭' }
+    isCorrectByRound:
+      type: array
+      minItems: 1
+      items:
+        type: boolean
+        nullable: true
+      example: [ true, true, false, null, null ]
   required: [sessionId, state, round, answeredCount]
 
 PracticeResumeEnded:
@@ -144,6 +153,14 @@ PracticeResumeEnded:
     score: { type: integer, example: 4 }
     wrongCount: { type: integer, example: 1 }
     totalRounds: { type: integer, example: 5 }
+    wrong: { type: integer, example: 1, description: 'wrongCount의 응답용 별칭' }
+    isCorrectByRound:
+      type: array
+      minItems: 1
+      items:
+        type: boolean
+        nullable: true
+      example: [ true, false, true, false, true ]
   required: [sessionId, state, round, score, wrongCount, totalRounds]
 
 PracticeResumeResponse:
