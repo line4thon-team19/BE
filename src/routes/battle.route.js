@@ -23,6 +23,8 @@ const router = express.Router();
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://app.example.com';
 
 const ROOM = (sessionId) => `battle:room:${sessionId}`;
+const PFX = 'battle:session';
+
 const normalizeText = (s) =>
   String(s || '')
     .normalize('NFKC')
@@ -34,6 +36,28 @@ const normalizeText = (s) =>
 const toSTATE = (status) => String(status || '').toUpperCase();
 // 라운드 제한시간 30초
 const PER_ROUND_MS = 30 * 1000;
+
+// 마지막 답/정답여부 조회
+const getLastAnswerFromRedis = async (redisClient, sessId, roundNo, playerId) => {
+  // WS 포맷
+  const wsKey = `${PFX}:${sessId}:round:${roundNo}:answer:${playerId}`;
+  const wsAll = await redisClient.hGetAll(wsKey);
+  if (wsAll && Object.keys(wsAll).length) {
+    const text = wsAll.text ?? null;
+    const result = wsAll.result ?? null;
+    const isCorrect = result === 'correct';
+    return { lastAnswer: text, isCorrect };
+  }
+
+  // REST 포맷
+  const restKey = keys.battleRoundAnswer(sessId, roundNo);
+  const [text, result] = await redisClient.hmGet(restKey, [
+    `lastAnswer:${playerId}`,
+    `result:${playerId}`, // 있으면 사용, 없으면 null
+  ]);
+  const isCorrect = result === 'correct';
+  return { lastAnswer: text ?? null, isCorrect: !!(text && isCorrect) };
+};
 
 /** 방 생성(방장) */
 router.post('/rooms', authenticateGuest, async (req, res) => {
@@ -495,7 +519,7 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     const session = await getSession(sessionId);
     if (!session) return res.status(404).json({ message: 'Session not found or expired' });
 
-    // 플레이어 목록
+    // 플레이어 목록 정규화
     let players = Array.isArray(session.players) ? session.players.slice() : [];
     if (!players.length && session.hostId) {
       players = [{ playerId: session.hostId, isHost: true }];
@@ -512,7 +536,7 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     const scoreMap = await getScores(sessionId);
     const scoreById = (pid) => Number(scoreMap[pid] ?? 0);
 
-    const summary = players.map((p) => {
+    const fullSummary = players.map((p) => {
       const score = scoreById(p.playerId);
       return {
         playerId: p.playerId,
@@ -521,27 +545,52 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
         wrong: Math.max(totalRounds - score, 0),
       };
     });
+    const summary = you ? fullSummary.filter((s) => s.playerId === you) : fullSummary;
+
+    const redis = await getRedis();
 
     const rounds = [];
     for (let r = 1; r <= totalRounds; r++) {
-      const questionId = session?.questions?.[r - 1]?.id ?? null;
+      const q = session?.questions?.[r - 1] || {};
 
-      const winner = await getRoundWinner(sessionId, r);
+      // 요청자만 players에 포함
+      const playersOut = [];
+      if (you) {
+        const { lastAnswer, isCorrect } = await getLastAnswerFromRedis(redis, sessionId, r, you);
+        playersOut.push({
+          playerId: you,
+          isCorrect,
+          lastAnswer,
+        });
+      } else {
+        // you가 없으면 기존처럼 전체 포함
+        for (const p of players) {
+          const { lastAnswer, isCorrect } = await getLastAnswerFromRedis(
+            redis,
+            sessionId,
+            r,
+            p.playerId,
+          );
+          playersOut.push({ playerId: p.playerId, isCorrect, lastAnswer });
+        }
+      }
 
-      // isCorrect: 단일 정답 선점 모델이므로 승자만 true, 나머지는 false
-      const playersResult = players.map((p) => ({
-        playerId: p.playerId,
-        isCorrect: winner ? p.playerId === winner : false,
-      }));
-
-      rounds.push({ round: r, questionId, winner: winner || null, players: playersResult });
+      rounds.push({
+        round: r,
+        question: {
+          questionId: q.id ?? q.questionId ?? (typeof q.id === 'number' ? String(q.id) : String(r)),
+          text: q.text ?? q.correctSentence ?? q.answer ?? null,
+          wrongText: q.wrongText ?? q.wrongSentence ?? null,
+          explanation: q.explanation ?? null,
+        },
+        players: playersOut,
+      });
     }
 
-    // 최종 승자/패자 계산
-    const host = summary.find((s) => s.isHost);
-    const guest = summary.find((s) => !s.isHost);
+    // 승/패 계산
     let winnerPlayerId = null;
-
+    const host = fullSummary.find((s) => s.isHost);
+    const guest = fullSummary.find((s) => !s.isHost);
     if (host && guest) {
       if (host.score !== guest.score) {
         winnerPlayerId = host.score > guest.score ? host.playerId : guest.playerId;
@@ -562,7 +611,7 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     }
 
     return res.status(200).json({
-      state: (session.status || 'ended').toUpperCase(), // WAITING/PLAYING/ENDED
+      state: (session.status || 'ended').toUpperCase(),
       result,
       summary,
       rounds,
