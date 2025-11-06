@@ -41,4 +41,15 @@ async function savePracticeSession(session) {
   return key;
 }
 
-module.exports = { createPracticeSession, getPracticeSession, savePracticeSession };
+async function deletePracticeSession(sessionId) {
+  const redis = await getRedis();
+  if (!isRedisReady()) throw new Error('Redis not ready');
+  if (!sessionId) throw new Error('Invalid sessionId');
+
+  const key = keys.practiceSession(sessionId);
+  const deleted = await redis.del(key); // 삭제된 키 개수(0 또는 1)
+  console.log('[PracticeSession] deleted:', key, 'count:', deleted);
+  return deleted > 0;
+}
+
+module.exports = { createPracticeSession, getPracticeSession, savePracticeSession, deletePracticeSession };

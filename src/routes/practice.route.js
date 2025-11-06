@@ -5,6 +5,7 @@ const {
   createPracticeSession,
   getPracticeSession,
   savePracticeSession,
+  deletePracticeSession,
 } = require('../repositories/practiceSessionRepo');
 
 const router = express.Router();
@@ -420,6 +421,33 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     });
   } catch (e) {
     console.error('[GET /practice/:sessionId] error:', e);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+// 세션 삭제
+router.delete('/:sessionId', authenticateGuest, async (req, res) => {
+  try {
+    const raw = String(req.params.sessionId ?? '');
+    const sessionId = decodeURIComponent(raw).trim();
+
+    const sess = await getPracticeSession(sessionId);
+    if (!sess) {
+      return res.status(404).json({ message: 'Session not found or expired' });
+    }
+    if (sess.guestId && sess.guestId !== req.user.playerId) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const ok = await deletePracticeSession(sessionId);
+
+    return res.status(200).json({
+      deleted: !!ok,
+      sessionId,
+      message: 'Practice session deleted',
+    });
+  } catch (e) {
+    console.error('[DELETE /practice/:sessionId] error:', e);
     return res.status(500).json({ message: 'Internal Server Error' });
   }
 });

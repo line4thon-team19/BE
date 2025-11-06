@@ -150,3 +150,11 @@ PracticeResumeResponse:
   oneOf:
     - $ref: '#/PracticeResumePlaying'
     - $ref: '#/PracticeResumeEnded'
+
+PracticeDeleteResponse:
+  type: object
+  properties:
+    deleted:   { type: boolean, example: true }
+    sessionId: { type: string,  example: p_ab12cd34 }
+    message:   { type: string,  example: Practice session deleted }
+  required: [deleted, sessionId, message]

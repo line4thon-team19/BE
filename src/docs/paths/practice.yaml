@@ -111,3 +111,27 @@ paths:
         "404": { $ref: '../components/responses.yaml#/NotFound' }
         "409": { $ref: '../components/responses.yaml#/Conflict' }
         "500": { $ref: '../components/responses.yaml#/ServerError' }
+
+    delete:
+      tags: [Practice]
+      summary: 연습모드 세션 삭제
+      description: 사용자가 홈으로 돌아갈 때, 자신의 연습 세션을 즉시 삭제합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+               $ref: '../components/schemas.yaml#/PracticeDeleteResponse'
+        '400': { $ref: '../components/responses.yaml#/BadRequest' }
+        '401': { $ref: '../components/responses.yaml#/Unauthorized' }
+        '403': { $ref: '../components/responses.yaml#/Forbidden' }
+        '404': { $ref: '../components/responses.yaml#/NotFound' }
+        '500': { $ref: '../components/responses.yaml#/ServerError' }
