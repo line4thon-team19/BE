@@ -659,13 +659,48 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
       if (hostId) players = [{ playerId: hostId, isHost: true }];
     }
 
+    // 남은 시간 계산
+    const now = Date.now();
+    const deadline = Number(base?.deadlineAt ?? session.deadlineAt ?? 0);
+
+    const remainingTime =
+      status === 'PLAYING' && deadline > now ? Math.ceil((deadline - now) / 1000) : 0;
+
+    // 완료된 라운드 수 계산
+    const completedRounds =
+      status === 'PLAYING' ? Math.max(0, Number(round.current || 1) - 1) : Number(totalRounds);
+
+    // 완료된 라운드의 승자 로드
+    const winners = new Array(totalRounds + 1).fill(null);
+    if (completedRounds > 0) {
+      const winnerList = await Promise.all(
+        Array.from({ length: completedRounds }, (_, i) => getRoundWinner(sessionId, i + 1)),
+      );
+      for (let i = 0; i < winnerList.length; i += 1) {
+        winners[i + 1] = winnerList[i] || null; // 라운드 i+1의 승자 또는 null(시간초과)
+      }
+    }
+
     const summary = players.map((p) => {
-      const score = scoreById(p.playerId);
+      const score = scoreById(p.playerId); // 획득 점수 = 맞춘 라운드 수
+      const perRound = [];
+      for (let r = 1; r <= totalRounds; r += 1) {
+        if (r > completedRounds) {
+          perRound.push(null);
+        } else {
+          const w = winners[r];
+          perRound.push(w ? w === p.playerId : false);
+        }
+      }
+
+      const wrong = Math.max(completedRounds - score, 0);
+
       return {
         playerId: p.playerId,
         isHost: !!p.isHost,
         score,
-        wrong: Math.max(totalRounds - score, 0),
+        wrong,
+        isCorrectByRound: perRound,
       };
     });
 
@@ -682,10 +717,6 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
         }
       }
     }
-
-    // 남은 시간 계산
-    const now = Date.now();
-    const deadline = Number(base?.deadlineAt ?? session.deadlineAt ?? 0);
 
     // 타임아웃 시 즉시 라운드 전진 (REST 폴링)
     if (status === 'PLAYING' && deadline && now > deadline) {
@@ -710,9 +741,6 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
         console.warn('[GET timeout advance] failed:', e?.message || e);
       }
     }
-
-    const remainingTime =
-      status === 'PLAYING' && deadline > now ? Math.ceil((deadline - now) / 1000) : 0;
 
     return res.status(200).json({
       status, // WAITING / PLAYING / ENDED
