@@ -54,7 +54,7 @@ PracticeStartResponse:
   type: object
   properties:
     sessionId: { type: string, example: p_ab12cd34 }
-    state:     { type: string, enum: [PLAYING, ENDED], example: PLAYING }
+    status:     { type: string, enum: [playing, ended], example: playing }
     countdown: { $ref: '#/PracticeCountdown' }
     round:     { $ref: '#/PracticeRound' }
     timeLimit: { type: integer, example: 20 }
@@ -63,7 +63,7 @@ PracticeStartResponse:
       minItems: 5
       maxItems: 5
       items: { $ref: '#/PracticeQuestionPublic' }
-  required: [sessionId, state, countdown, round, timeLimit, questions]
+  required: [sessionId, status, countdown, round, timeLimit, questions]
 
 PracticeAnswerNext:
   type: object
@@ -81,7 +81,7 @@ PracticeAnswerNext:
 PracticeAnswerEnd:
   type: object
   properties:
-    state: { type: string, enum: [ENDED], example: ENDED }
+    status: { type: string, enum: [ended], example: ended }
     round: { $ref: '#/PracticeRound' }
     result: { type: string, enum: [correct, wrong, timeout], example: wrong }
     next:
@@ -89,7 +89,7 @@ PracticeAnswerEnd:
       properties:
         hasNext: { type: boolean, example: false }
       required: [hasNext]
-  required: [state, round, result, next]
+  required: [status, round, result, next]
 
 PracticeResultRow:
   type: object
@@ -105,20 +105,20 @@ PracticeResultRow:
 PracticeResultResponse:
   type: object
   properties:
-    state:       { type: string, enum: [ENDED], example: ENDED }
+    status:       { type: string, enum: [ended], example: ended }
     score:       { type: integer, example: 4 }
     wrongCount:  { type: integer, example: 1 }
     totalRounds: { type: integer, example: 5 }
     questions:
       type: array
       items: { $ref: '#/PracticeResultRow' }
-  required: [state, score, wrongCount, totalRounds, questions]
+  required: [status, score, wrongCount, totalRounds, questions]
 
 PracticeResumePlaying:
   type: object
   properties:
     sessionId: { type: string, example: p_ab12cd34 }
-    state: { type: string, enum: [PLAYING], example: PLAYING }
+    status: { type: string, enum: [playing], example: playing }
     countdown:
       type: object
       properties:
@@ -134,7 +134,7 @@ PracticeResumePlaying:
         - $ref: '#/PracticeQuestionPublic'
       nullable: true
     score: { type: integer, example: 2 }
-    wrong: { type: integer, example: 1, description: 'wrongCount의 응답용 별칭' }
+    wrongCount: { type: integer, example: 1 }
     isCorrectByRound:
       type: array
       minItems: 1
@@ -142,18 +142,17 @@ PracticeResumePlaying:
         type: boolean
         nullable: true
       example: [ true, true, false, null, null ]
-  required: [sessionId, state, round, answeredCount]
+  required: [sessionId, status, round, answeredCount, wrongCount]
 
 PracticeResumeEnded:
   type: object
   properties:
     sessionId: { type: string, example: p_ab12cd34 }
-    state: { type: string, enum: [ENDED], example: ENDED }
+    status: { type: string, enum: [ended], example: ended }
     round: { $ref: '#/PracticeRound' }
     score: { type: integer, example: 4 }
     wrongCount: { type: integer, example: 1 }
     totalRounds: { type: integer, example: 5 }
-    wrong: { type: integer, example: 1, description: 'wrongCount의 응답용 별칭' }
     isCorrectByRound:
       type: array
       minItems: 1
@@ -161,7 +160,7 @@ PracticeResumeEnded:
         type: boolean
         nullable: true
       example: [ true, false, true, false, true ]
-  required: [sessionId, state, round, score, wrongCount, totalRounds]
+  required: [sessionId, status, round, score, wrongCount, totalRounds]
 
 PracticeResumeResponse:
   oneOf:
@@ -175,3 +174,11 @@ PracticeDeleteResponse:
     sessionId: { type: string,  example: p_ab12cd34 }
     message:   { type: string,  example: Practice session deleted }
   required: [deleted, sessionId, message]
+
+# 강제 종료
+ForceEndResponse:
+  type: object
+  properties:
+    status: { type: string, enum: [ended], example: ended }
+    alreadyEnded: { type: boolean, example: false }
+  required: [sessionId, kind, status, alreadyEnded, endedAt]
