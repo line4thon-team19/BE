@@ -11,6 +11,8 @@ paths:
     $ref: './paths/users.yaml#/paths/~1api~1health'
   /api/guest:
     $ref: './paths/users.yaml#/paths/~1api~1guest'
+  /api/sessions/{sessionId}/force-end:
+    $ref: './paths/users.yaml#/paths/~1api~1sessions~1{sessionId}~1force-end'
 
   # 배틀모드
   /api/battle/rooms:
@@ -45,15 +47,18 @@ components:
   schemas:
     PracticeStartResponse: { $ref: './components/schemas.yaml#/PracticeStartResponse' }
     PracticeAnswerRequest: { $ref: './components/schemas.yaml#/PracticeAnswerRequest' }
-    PracticeAnswerNext: { $ref: './components/schemas.yaml#/PracticeAnswerNext' }
-    PracticeAnswerEnd: { $ref: './components/schemas.yaml#/PracticeAnswerEnd' }
+    PracticeAnswerNext:    { $ref: './components/schemas.yaml#/PracticeAnswerNext' }
+    PracticeAnswerEnd:     { $ref: './components/schemas.yaml#/PracticeAnswerEnd' }
     PracticeResultResponse: { $ref: './components/schemas.yaml#/PracticeResultResponse' }
     PracticeResumePlaying: { $ref: './components/schemas.yaml#/PracticeResumePlaying' }
-    PracticeResumeEnded: { $ref: './components/schemas.yaml#/PracticeResumeEnded' }
+    PracticeResumeEnded:   { $ref: './components/schemas.yaml#/PracticeResumeEnded' }
     PracticeResumeResponse: { $ref: './components/schemas.yaml#/PracticeResumeResponse' }
+    ForceEndResponse:      { $ref: './components/schemas.yaml#/ForceEndResponse' }
+    
   responses:
-    BadRequest: { $ref: './components/responses.yaml#/BadRequest' }
+    BadRequest:  { $ref: './components/responses.yaml#/BadRequest' }
     Unauthorized: { $ref: './components/responses.yaml#/Unauthorized' }
-    NotFound: { $ref: './components/responses.yaml#/NotFound' }
-    Conflict: { $ref: './components/responses.yaml#/Conflict' }
+    Forbidden:   { $ref: './components/responses.yaml#/Forbidden' }
+    NotFound:    { $ref: './components/responses.yaml#/NotFound' }
+    Conflict:    { $ref: './components/responses.yaml#/Conflict' }
     ServerError: { $ref: './components/responses.yaml#/ServerError' }

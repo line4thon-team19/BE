@@ -5,7 +5,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 
 const routes = require('./src/routes');
-const battleRoute = require('./src/routes/battle.route');
 
 const app = express();
 
@@ -25,6 +24,5 @@ app.get('/', (_req, res) => res.send('OK'));
 
 // API 라우트
 app.use('/api', routes);
-app.use('/api/battle', battleRoute);
 
 module.exports = app;

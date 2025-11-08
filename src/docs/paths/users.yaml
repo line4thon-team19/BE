@@ -29,3 +29,32 @@ paths:
                 $ref: '../components/schemas.yaml#/GuestResponse'
         '500':
           $ref: '../components/responses.yaml#/ServerError'
+
+  /api/sessions/{sessionId}/force-end:
+    post:
+      tags: [Session]
+      summary: 세션 강제 종료
+      description: practice/battle 공용 강제 종료
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 강제 종료됨
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/ForceEndResponse'
+              examples:
+                minimal:
+                  value:
+                    status: ended
+                    alreadyEnded: true
+        "401": { $ref: '../components/responses.yaml#/Unauthorized' }
+        "403": { $ref: '../components/responses.yaml#/Forbidden' }
+        "404": { $ref: '../components/responses.yaml#/NotFound' }
+        "500": { $ref: '../components/responses.yaml#/ServerError' }

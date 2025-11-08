@@ -119,7 +119,7 @@ router.post('/start', authenticateGuest, express.json(), async (req, res) => {
     const session = {
       sessionId,
       guestId: req.user?.playerId || null,
-      state: 'PLAYING',
+      status: 'playing',
       countdownEndAt,
       round: { current: 1, total },
       timeLimit,
@@ -147,7 +147,7 @@ router.post('/start', authenticateGuest, express.json(), async (req, res) => {
 
     return res.json({
       sessionId,
-      state: 'PLAYING',
+      status: 'playing',
       ...(countdown ? { countdown } : {}),
       round: { current: 1, total },
       timeLimit,
@@ -179,7 +179,7 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
 
     const sess = await getPracticeSession(sessionId);
     if (!sess) return res.status(404).json({ message: 'Session not found or expired' });
-    if (sess.state === 'ENDED') return res.status(409).json({ message: 'Already ended' });
+    if (sess.status === 'ended') return res.status(409).json({ message: 'Already ended' });
     if (sess.guestId && sess.guestId !== req.user.playerId) {
       return res.status(403).json({ message: 'Forbidden' });
     }
@@ -205,10 +205,10 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
       const { isLast } = recordTimeout(sess);
 
       if (isLast) {
-        sess.state = 'ENDED';
+        sess.status = 'ended';
         await savePracticeSession(sess);
         return res.json({
-          state: 'ENDED',
+          status: 'ended',
           round: { current: serverCurrent, total },
           result: 'timeout',
           next: { hasNext: false },
@@ -259,10 +259,10 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     const isLast = serverCurrent >= total;
 
     if (isLast) {
-      sess.state = 'ENDED';
+      sess.status = 'ended';
       await savePracticeSession(sess);
       return res.json({
-        state: 'ENDED',
+        status: 'ended',
         round: { current: serverCurrent, total },
         result: isCorrect ? 'correct' : 'wrong',
         next: { hasNext: false },
@@ -306,7 +306,7 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     if (sess.guestId && sess.guestId !== req.user.playerId) {
       return res.status(403).json({ message: 'Forbidden' });
     }
-    if (sess.state !== 'ENDED') {
+    if (sess.status !== 'ended') {
       return res.status(409).json({ message: 'Not ended yet' });
     }
 
@@ -333,7 +333,7 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     });
 
     return res.json({
-      state: 'ENDED',
+      status: 'ended',
       score: sess.score ?? 0,
       wrongCount: sess.wrongCount ?? 0,
       totalRounds,
@@ -364,21 +364,19 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     let remainingTime = calcRemaining(sess);
 
     // 자동 타임아웃 처리
-    if (!countdown && sess.state === 'PLAYING' && remainingTime === 0) {
+    if (!countdown && sess.status === 'playing' && remainingTime === 0) {
       const { isLast } = recordTimeout(sess);
 
       if (isLast) {
-        sess.state = 'ENDED';
+        sess.status = 'ended';
         await savePracticeSession(sess);
         return res.json({
           sessionId: sess.sessionId,
-          state: 'ENDED',
+          status: 'ended',
           round: { current, total },
           score: sess.score ?? 0,
           wrongCount: sess.wrongCount ?? 0,
           totalRounds: total,
-          // 추가
-          wrong: sess.wrongCount ?? 0,
           isCorrectByRound: buildIsCorrectByRound(sess),
         });
       }
@@ -396,11 +394,11 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
       remainingTime = calcRemaining(sess);  // 새 라운드의 full timeLimit로 갱신됨
     }
 
-    // ENDED 응답
-    if (sess.state === 'ENDED') {
+    // ended 응답
+    if (sess.status === 'ended') {
       return res.json({
         sessionId: sess.sessionId,
-        state: 'ENDED',
+        status: 'ended',
         round: { current: Math.min(current, total || 1), total },
         score: sess.score ?? 0,
         wrongCount: sess.wrongCount ?? 0,
@@ -410,22 +408,21 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
       });
     }
 
-    // PLAYING 응답
+    // playing 응답
     const idx = Math.max(0, current - 1);
     const q = (sess.questions || [])[idx];
 
     if (countdown) {
       return res.json({
         sessionId: sess.sessionId,
-        state: 'PLAYING',
+        status: 'playing',
         countdown,
         round: { current, total },
         timeLimit: sess.timeLimit ?? null,
         remainingTime, // 재계산된 값
         answeredCount: Array.isArray(sess.answers) ? sess.answers.length : 0,
-        // 추가
         score: sess.score ?? 0,
-        wrong: sess.wrongCount ?? 0,
+        wrongCount: sess.wrongCount ?? 0,
         isCorrectByRound: buildIsCorrectByRound(sess),
       });
     }
@@ -436,14 +433,14 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
 
     return res.json({
       sessionId: sess.sessionId,
-      state: 'PLAYING',
+      status: 'playing',
       round: { current, total },
       timeLimit: sess.timeLimit ?? null,
       remainingTime, // 재계산된 값
       answeredCount: Array.isArray(sess.answers) ? sess.answers.length : 0,
       question: currentQuestion,
       score: sess.score ?? 0,
-      wrong: sess.wrongCount ?? 0,
+      wrongCount: sess.wrongCount ?? 0,
       isCorrectByRound: buildIsCorrectByRound(sess),
     });
   } catch (e) {
