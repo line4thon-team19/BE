@@ -165,9 +165,8 @@ router.post('/:sessionId/start', authenticateGuest, express.json(), async (req, 
 
     // 문제 5개 랜덤 선택
     const questions = await getRandomBattleQuestions(5);
-    if (questions.length < 5) {
-      return res.status(422).json({ message: '문제가 5개 이상 필요합니다.' });
-    }
+    const uniq = Array.from(new Map(questions.map((q) => [q.id, q])).values());
+    if (uniq.length < 5) return res.status(422).json({ message: '문제가 5개 이상 필요합니다.' });
 
     const nowIso = new Date().toISOString();
 
