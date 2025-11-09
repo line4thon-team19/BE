@@ -76,6 +76,13 @@ PracticeAnswerNext:
         result: { type: string, enum: [correct, wrong, timeout], example: correct }
         question: { $ref: '#/PracticeQuestionPublic' }
       required: [hasNext, result, question]
+    isCorrectByRound:
+      type: array
+      minItems: 1
+      items:
+        type: boolean
+        nullable: true
+      example: [ false, false, null, null, null ]
   required: [round, next]
 
 PracticeAnswerEnd:
