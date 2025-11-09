@@ -124,6 +124,11 @@ function register(io, socket) {
       const { sessionId } = payload || {};
       if (!sessionId) throw new Error('sessionId required');
 
+      socket.data.battle = {
+        sessionId,
+        playerId: socket.data.playerId, // auth 미들웨어에서 이미 넣어줬다고 가정
+      };
+
       await socket.join(ROOM(sessionId));
 
       const snap = await makeSnapshot(sessionId);
@@ -238,8 +243,35 @@ function register(io, socket) {
     }
   });
 
-  socket.on('disconnect', () => {
-    // 세션-플레이어 퇴장 처리 필요 시 구현
+  socket.on('disconnect', async () => {
+    const battle = socket.data.battle;
+    if (!battle) return;
+
+    const { sessionId, playerId } = battle;
+
+    console.log('[battle:disconnect]', {
+      socketId: socket.id,
+      sessionId,
+      playerId,
+    });
+
+    // 이미 끝난 세션이면 알림 안보냄
+    try {
+      const sess = await getSession(sessionId);
+      if (!sess) return;
+      if (String(sess.status || 'ENDED').toUpperCase() === 'ENDED') {
+        return;
+      }
+    } catch (e) {
+      return;
+    }
+
+    // 같은 배틀룸에 남아있는 상대에게 알림 방송
+    socket.to(ROOM(sessionId)).emit('battle:opponent_disconnected', {
+      playerId,
+      ts: Date.now(),
+      message: '상대방의 연결이 끊어졌습니다.',
+    });
   });
 }
 
