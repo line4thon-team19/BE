@@ -159,6 +159,40 @@ async function getScores(sessionId) {
   return h || {};
 }
 
+// 배틀 세션 및 관련 Redis 키 삭제
+async function deleteSession(sessionId) {
+  const redis = await getRedis();
+  if (!isRedisReady()) throw new Error('Redis not ready');
+
+  const key = keys.battleSession(sessionId);
+  const raw = await redis.get(key);
+  if (!raw) return false;
+
+  const s = JSON.parse(raw);
+  const pipeline = redis.multi();
+
+  // 세션 본문 삭제
+  pipeline.del(key);
+
+  // roomCode 인덱스 삭제
+  if (s.roomCode) {
+    pipeline.del(keys.battleRoomCode(s.roomCode));
+  }
+
+  // 점수 해시 삭제
+  pipeline.del(keys.battleScore(sessionId));
+
+  // 라운드별 정답/승자 키 삭제
+  const totalRounds = Number(s?.round?.total || 0);
+  for (let round = 1; round <= totalRounds; round += 1) {
+    pipeline.del(keys.battleRoundAnswer(sessionId, round));
+    pipeline.del(keys.battleRoundWinner(sessionId, round));
+  }
+
+  await pipeline.exec();
+  return true;
+}
+
 module.exports = {
   existsRoomCode,
   createSession,
@@ -172,4 +206,5 @@ module.exports = {
   addScore,
   advanceRoundOrEnd,
   getScores,
+  deleteSession,
 };

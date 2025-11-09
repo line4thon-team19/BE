@@ -245,3 +245,36 @@ paths:
           $ref: '../components/responses.yaml#/Unauthorized'
         '500':
           $ref: '../components/responses.yaml#/ServerError'
+
+  /api/battle/{sessionId}/delete:
+    delete:
+      tags: [Battle]
+      summary: 배틀룸 세션 삭제
+      description: >
+        사용자가 홈으로 돌아갈 때, 자신의 배틀 세션을 즉시 삭제합니다.
+        (Redis에서 배틀 세션 및 관련 인덱스를 삭제합니다.)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          description: 배틀 세션 ID
+          schema:
+            type: string
+            example: b_ab12cd34
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/BattleDeleteResponse'
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '404':
+          $ref: '../components/responses.yaml#/NotFound'
+        '409':
+          $ref: '../components/responses.yaml#/Conflict'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'

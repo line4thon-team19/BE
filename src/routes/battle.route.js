@@ -15,6 +15,7 @@ const {
   addScore,
   advanceRoundOrEnd,
   getScores,
+  deleteSession,
 } = require('../repositories/battleSessionRepo');
 const { getRandomBattleQuestions } = require('../repositories/battleQuestionRepo');
 const { getRedis } = require('../libs/redisClient');
@@ -751,6 +752,33 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     });
   } catch (err) {
     console.error('[GET /api/battle/:sessionId] error:', err);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+/** 배틀룸 삭제 */
+router.delete('/:sessionId/delete', authenticateGuest, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    // 세션 존재 여부 먼저 확인
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ code: '404_ROOM_NOT_FOUND', message: 'Room not found' });
+    }
+
+    const deleted = await deleteSession(sessionId);
+    if (!deleted) {
+      return res.status(404).json({ code: '404_ROOM_NOT_FOUND', message: 'Room not found' });
+    }
+
+    return res.status(200).json({
+      deleted: true,
+      sessionId,
+      message: 'Battle session deleted',
+    });
+  } catch (err) {
+    console.error('[DELETE /api/battle/:sessionId/delete] error:', err);
     return res.status(500).json({ message: 'Internal Server Error' });
   }
 });

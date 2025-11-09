@@ -82,7 +82,7 @@ PracticeAnswerNext:
       items:
         type: boolean
         nullable: true
-      example: [ false, false, null, null, null ]
+      example: [false, false, null, null, null]
   required: [round, next]
 
 PracticeAnswerEnd:
@@ -433,3 +433,17 @@ BattleRoomResponse:
       description: 남은 시간(초). 없으면 0.
       example: 20
   required: [status, hostId, round, summary, remainingTime]
+
+BattleDeleteResponse:
+  type: object
+  properties:
+    deleted:
+      type: boolean
+      example: true
+    sessionId:
+      type: string
+      example: b_ab12cd34
+    message:
+      type: string
+      example: Battle session deleted
+  required: [deleted, sessionId, message]
