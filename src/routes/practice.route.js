@@ -212,6 +212,7 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
           round: { current: serverCurrent, total },
           result: 'timeout',
           next: { hasNext: false },
+          isCorrectByRound: buildIsCorrectByRound(sess),
         });
       }
 
@@ -288,6 +289,7 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
           options: [nq.choice1, nq.choice2],
         },
       },
+      isCorrectByRound: buildIsCorrectByRound(sess),
     });
   } catch (e) {
     console.error('[POST /practice/:sessionId/answer] error:', e);
