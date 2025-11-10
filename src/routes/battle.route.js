@@ -606,8 +606,14 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     }
 
     let result = null;
-    if (you && winnerPlayerId) {
-      result = you === winnerPlayerId ? 'win' : 'lose';
+
+    if (you) {
+      if (!winnerPlayerId) {
+        // 승자 없으면 무승부
+        result = 'tie';
+      } else {
+        result = you === winnerPlayerId ? 'win' : 'lose';
+      }
     }
 
     return res.status(200).json({
@@ -645,7 +651,7 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     const base = await getSessionBasicForPlay(sessionId);
     // base: { sessionId, status, roomCode, hostId, round, correctAnswer, deadlineAt }
 
-    const status = String(base?.status || session.status || 'ended').toUpperCase();
+    let status = String(base?.status || session.status || 'ended').toUpperCase();
     const hostId = base?.hostId || session.hostId || null;
     const round = base?.round || session.round || { current: 1, total: 5 };
 
@@ -662,9 +668,6 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     // 남은 시간 계산
     const now = Date.now();
     const deadline = Number(base?.deadlineAt ?? session.deadlineAt ?? 0);
-
-    const remainingTime =
-      status === 'PLAYING' && deadline > now ? Math.ceil((deadline - now) / 1000) : 0;
 
     // 완료된 라운드 수 계산
     const completedRounds =
@@ -728,6 +731,7 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
           // 게임 종료
           await r.hSet(keys.battleSessionState(sessionId), { state: 'ENDED', roundEndsAt: '' });
           round.current = Number(round.total || 5);
+          status = 'ENDED'; // 타임아웃 후 세션 종료 시 상태 갱신
         } else {
           // 다음 라운드로 진행
           const nextRound = Math.min(Number(round.current || 1) + 1, Number(round.total || 5));
@@ -741,6 +745,9 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
         console.warn('[GET timeout advance] failed:', e?.message || e);
       }
     }
+
+    const remainingTime =
+      status === 'PLAYING' && deadline > now ? Math.ceil((deadline - now) / 1000) : 0;
 
     return res.status(200).json({
       status, // WAITING / PLAYING / ENDED

@@ -395,9 +395,10 @@ BattleResultResponse:
       example: ended
     result:
       type: string
-      enum: [win, lose]
+      enum: [win, lose, tie]
       nullable: true
-      example: win
+      example: tie
+      description: 게임 결과 (승=win, 패=lose, 무승부=tie)
     summary:
       type: array
       items:
