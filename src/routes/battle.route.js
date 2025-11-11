@@ -575,6 +575,9 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
         }
       }
 
+      // 라운드 승자 정보 로드 (WS/REST 공통)
+      const winnerForRound = await getRoundWinner(sessionId, r);
+
       rounds.push({
         round: r,
         question: {
@@ -584,6 +587,7 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
           explanation: q.explanation ?? null,
         },
         players: playersOut,
+        winner: winnerForRound || null,
       });
     }
 
@@ -655,23 +659,47 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     const hostId = base?.hostId || session.hostId || null;
     const round = base?.round || session.round || { current: 1, total: 5 };
 
+    //  WS 쪽 상태(battleSessionState)와 동기화
+    let currentRound = Number(round.current || 1);
+    let totalRounds = Number(round.total || session?.questions?.length || 5);
+    let deadlineFromState = null;
+
+    try {
+      const r = await getRedis();
+      const [stCur, stTot, stState, stEndAt] = await r.hmGet(keys.battleSessionState(sessionId), [
+        'roundCurrent',
+        'roundTotal',
+        'state',
+        'roundEndsAt',
+      ]);
+
+      if (stCur) currentRound = Number(stCur);
+      if (stTot) totalRounds = Number(stTot);
+      if (stState) status = String(stState).toUpperCase();
+      if (stEndAt) deadlineFromState = Number(stEndAt);
+
+      round.current = currentRound;
+      round.total = totalRounds;
+    } catch (e) {
+      console.warn('[GET /api/battle/:sessionId] sync with WS state failed:', e?.message || e);
+    }
+
     // 점수 해시
     const scoreMap = await getScores(sessionId);
     const scoreById = (pid) => Number(scoreMap?.[pid] ?? 0);
-    const totalRounds = Number(round?.total || session?.questions?.length || 5);
 
     if (!players.length) {
       // 플레이어 정보가 전혀 없으면 최소 호스트만 구성
       if (hostId) players = [{ playerId: hostId, isHost: true }];
     }
 
-    // 남은 시간 계산
+    // 남은 시간 계산 (WS state에 roundEndsAt가 있으면 그걸 우선 사용)
     const now = Date.now();
-    const deadline = Number(base?.deadlineAt ?? session.deadlineAt ?? 0);
+    const deadline = deadlineFromState ?? Number(base?.deadlineAt ?? session.deadlineAt ?? 0);
 
     // 완료된 라운드 수 계산
     const completedRounds =
-      status === 'PLAYING' ? Math.max(0, Number(round.current || 1) - 1) : Number(totalRounds);
+      status === 'PLAYING' ? Math.max(0, currentRound - 1) : Number(totalRounds);
 
     // 완료된 라운드의 승자 로드
     const winners = new Array(totalRounds + 1).fill(null);
@@ -710,7 +738,7 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     // 현재 문제 (PLAYING일 때만 노출)
     let question = null;
     if (status === 'PLAYING') {
-      const idx = Math.max(0, Number(round.current || 1) - 1);
+      const idx = Math.max(0, currentRound - 1);
       const q = Array.isArray(session.questions) ? session.questions[idx] : null;
       if (q) {
         const questionId = q.questionId ?? q.id ?? (typeof q.id === 'number' ? String(q.id) : null);
@@ -730,11 +758,11 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
         if (moved?.ended) {
           // 게임 종료
           await r.hSet(keys.battleSessionState(sessionId), { state: 'ENDED', roundEndsAt: '' });
-          round.current = Number(round.total || 5);
+          round.current = Number(round.total || totalRounds);
           status = 'ENDED'; // 타임아웃 후 세션 종료 시 상태 갱신
         } else {
           // 다음 라운드로 진행
-          const nextRound = Math.min(Number(round.current || 1) + 1, Number(round.total || 5));
+          const nextRound = Math.min(currentRound + 1, totalRounds);
           await r.hSet(keys.battleSessionState(sessionId), {
             roundCurrent: String(nextRound),
             roundEndsAt: String(Date.now() + PER_ROUND_MS),
@@ -752,7 +780,10 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
     return res.status(200).json({
       status, // WAITING / PLAYING / ENDED
       hostId,
-      round: { current: Number(round.current || 1), total: Number(round.total || totalRounds) },
+      round: {
+        current: Number(round.current || currentRound || 1),
+        total: Number(round.total || totalRounds),
+      },
       question, // PLAYING일 때만 객체, 그 외 null
       summary,
       remainingTime,

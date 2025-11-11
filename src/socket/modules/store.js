@@ -98,19 +98,31 @@ async function judgeAndSave({ sessionId, round, playerId, normalizedAnswer, corr
 /**
  * 점수 요약 조회
  * key: battle:session:{sessionId}:score
+ * - WS:  plr123:score, plr123:wrong
+ * - REST: plr123 (점수)
+ * 둘 다 섞여 있어도 동작하도록 통합
  */
 async function getScoreSummary(sessionId) {
   const client = await getRedis();
   const key = keys.battleScore(sessionId);
   const all = await client.hGetAll(key);
 
+  if (!all || !Object.keys(all).length) return [];
+
   const players = new Set(Object.keys(all).map((k) => k.split(':')[0]));
+
   const out = [];
   for (const pid of players) {
+    const score = Number(
+      // WS 스타일 점수
+      all[`${pid}:score`] ?? all[pid] ?? 0,
+    );
+    const wrong = Number(all[`${pid}:wrong`] ?? 0); // WS에서만 사용
+
     out.push({
       playerId: pid,
-      score: Number(all[`${pid}:score`] || 0),
-      wrong: Number(all[`${pid}:wrong`] || 0),
+      score,
+      wrong,
     });
   }
   return out;
