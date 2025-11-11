@@ -114,7 +114,8 @@ async function claimRoundWinner(sessionId, round, playerId) {
 
 async function addScore(sessionId, playerId, delta = 1) {
   const redis = await getRedis();
-  await redis.hIncrBy(keys.battleScore(sessionId), playerId, delta);
+  // WS(judgeAndSave)와 동일 스키마로 통일: playerId:score
+  await redis.hIncrBy(keys.battleScore(sessionId), `${playerId}:score`, delta);
   await redis.expire(keys.battleScore(sessionId), TTL);
 }
 
@@ -152,11 +153,32 @@ async function advanceRoundOrEnd(sessionId, { perRoundMs = 0 } = {}) {
   return { advanced: false, ended: true, nextState: 'ended', nextRound: tot };
 }
 
-// 세션별 점수 조회
+// 세션별 점수 조회 (WS + REST 통합)
+// - WS:  plr123:score, plr123:wrong
+// - REST: plr123 (점수)
+// 최종적으로 { plr123: scoreNumber } 형태로 리턴
 async function getScores(sessionId) {
   const redis = await getRedis();
   const h = await redis.hGetAll(keys.battleScore(sessionId));
-  return h || {};
+  if (!h || !Object.keys(h).length) return {};
+
+  const out = {};
+
+  Object.entries(h).forEach(([key, val]) => {
+    const [pid, kind] = key.split(':');
+
+    if (!kind) {
+      out[pid] = (out[pid] || 0) + Number(val || 0);
+      return;
+    }
+
+    if (kind === 'score') {
+      out[pid] = (out[pid] || 0) + Number(val || 0);
+      return;
+    }
+  });
+
+  return out;
 }
 
 // 배틀 세션 및 관련 Redis 키 삭제

@@ -14,6 +14,7 @@ const {
   markAnswered,
 } = require('./store');
 const { normalizeText, rateLimiter } = require('./utils');
+const { claimRoundWinner } = require('../../repositories/battleSessionRepo');
 
 const ROOM = (sessionId) => `battle:room:${sessionId}`;
 
@@ -211,9 +212,19 @@ function register(io, socket) {
       });
 
       if (result === 'correct') {
-        // 정답을 맞추면 잠깐 보여준 뒤 다음 라운드로 전환
+        // 정답을 맞추면
+        // 1) 라운드 승자를 1회만 기록 (REST 조회용)
+        // 2) 정답 플래그 세팅
+        // 3) 잠깐 보여준 뒤 다음 라운드로 전환
         try {
+          try {
+            await claimRoundWinner(sessionId, round, socket.data.playerId);
+          } catch (e) {
+            console.warn('[answer] claimRoundWinner failed:', e?.message || e);
+          }
+
           await setCorrectFlag(sessionId, round);
+
           setTimeout(async () => {
             try {
               await advanceRoundWS(io, sessionId);
@@ -224,8 +235,9 @@ function register(io, socket) {
             }
           }, 900);
         } catch (e) {
-          console.warn('[answer] setCorrectFlag failed:', e?.message || e);
+          console.warn('[answer] correct-flow failed:', e?.message || e);
         }
+
         if (cb) cb({ ok: true, result });
         return;
       }
