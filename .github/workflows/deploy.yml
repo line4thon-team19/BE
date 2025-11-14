@@ -1,7 +1,7 @@
 name: CI-CD
 on:
   push:
-    branches: [develop]
+    branches: [main]
 
 concurrency:
   group: deploy-develop
