@@ -1,0 +1,54 @@
+name: CI-CD
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-develop
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/4thon:latest .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/4thon:latest
+
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            APP_DIR="${REMOTE_PATH:-/home/${USER}/app}"
+            cd "$APP_DIR"
+
+            # compose 파일/디렉토리 존재 확인
+            [ -f docker-compose.yml ] || { echo 'docker-compose.yml 없음'; exit 1; }
+
+            # 최신 이미지 받기 및 재기동
+            docker compose pull
+            docker compose up -d
+
+            # 간단 헬스체크
+            for i in {1..20}; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/healthz || true)
+              [ "$code" = "200" ] && { echo 'healthz OK'; exit 0; }
+              sleep 2
+            done
+            echo 'healthz FAIL'
+            docker compose logs --no-color --tail=200 app
+            exit 1

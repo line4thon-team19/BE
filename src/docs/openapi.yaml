@@ -1,0 +1,66 @@
+openapi: 3.1.0
+info:
+  title: 4thon-team19 API
+  version: 1.0.0
+servers:
+  - url: /
+    description: Local
+
+paths:
+  /api/health:
+    $ref: './paths/users.yaml#/paths/~1api~1health'
+  /api/guest:
+    $ref: './paths/users.yaml#/paths/~1api~1guest'
+  /api/sessions/{sessionId}/force-end:
+    $ref: './paths/users.yaml#/paths/~1api~1sessions~1{sessionId}~1force-end'
+
+  # 배틀모드
+  /api/battle/rooms:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1rooms'
+  /api/battle/{sessionId}/start:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1start'
+  /api/battle/entry:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1entry'
+  /api/battle/{sessionId}/answer:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1answer'
+  /api/battle/{sessionId}/result:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1result'
+  /api/battle/{sessionId}:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}'
+  /api/battle/{sessionId}/delete:
+    $ref: './paths/battle.yaml#/paths/~1api~1battle~1{sessionId}~1delete'
+
+  # 연습모드
+  /api/practice/start:
+    $ref: './paths/practice.yaml#/paths/~1api~1practice~1start'
+  /api/practice/{sessionId}/answer:
+    $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}~1answer'
+  /api/practice/{sessionId}/result:
+    $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}~1result'
+  /api/practice/{sessionId}:
+    $ref: './paths/practice.yaml#/paths/~1api~1practice~1{sessionId}'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    PracticeStartResponse: { $ref: './components/schemas.yaml#/PracticeStartResponse' }
+    PracticeAnswerRequest: { $ref: './components/schemas.yaml#/PracticeAnswerRequest' }
+    PracticeAnswerNext: { $ref: './components/schemas.yaml#/PracticeAnswerNext' }
+    PracticeAnswerEnd: { $ref: './components/schemas.yaml#/PracticeAnswerEnd' }
+    PracticeResultResponse: { $ref: './components/schemas.yaml#/PracticeResultResponse' }
+    PracticeResumePlaying: { $ref: './components/schemas.yaml#/PracticeResumePlaying' }
+    PracticeResumeEnded: { $ref: './components/schemas.yaml#/PracticeResumeEnded' }
+    PracticeResumeResponse: { $ref: './components/schemas.yaml#/PracticeResumeResponse' }
+    ForceEndResponse: { $ref: './components/schemas.yaml#/ForceEndResponse' }
+
+  responses:
+    BadRequest: { $ref: './components/responses.yaml#/BadRequest' }
+    Unauthorized: { $ref: './components/responses.yaml#/Unauthorized' }
+    Forbidden: { $ref: './components/responses.yaml#/Forbidden' }
+    NotFound: { $ref: './components/responses.yaml#/NotFound' }
+    Conflict: { $ref: './components/responses.yaml#/Conflict' }
+    ServerError: { $ref: './components/responses.yaml#/ServerError' }

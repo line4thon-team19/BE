@@ -1,0 +1,280 @@
+paths:
+  /api/battle/rooms:
+    post:
+      tags: [Battle]
+      summary: 배틀룸 생성
+      description: >
+        게스트 토큰으로 배틀룸(세션)을 생성합니다.
+        생성 시 상태는 항상 `waiting`이며,
+        클라이언트가 `state`, `round`, `status` 필드를 지정하면 400을 반환합니다.
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/BattleRoomCreateResponse'
+        '400':
+          $ref: '../components/responses.yaml#/BadRequest'
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '404':
+          $ref: '../components/responses.yaml#/NotFound'
+        '409':
+          $ref: '../components/responses.yaml#/Conflict'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'
+
+  /api/battle/{sessionId}/start:
+    post:
+      tags: [Battle]
+      summary: 배틀룸 카운트다운 시작(방장)
+      description: |
+        방장이 카운트다운을 시작합니다. 
+        - 카운트다운이 끝나면 서버가 자동으로 `status`를 `playing`으로 업데이트합니다. 
+        - 중복 시작 방지를 위해 이미 카운트다운 진행 중이거나 `waiting`이 아닌 경우 409를 반환합니다. 
+        - 참여 인원이 2명이 아닐 경우(상대 미입장) 409를 반환합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                countdownSec:
+                  type: integer
+                  minimum: 0
+                  maximum: 30
+                  default: 3
+      responses:
+        '200':
+          description: Countdown started
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/BattleCountdownStartResponse'
+        '400':
+          $ref: '../components/responses.yaml#/BadRequest'
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '403':
+          $ref: '../components/responses.yaml#/Forbidden'
+        '404':
+          $ref: '../components/responses.yaml#/NotFound'
+        '409':
+          $ref: '../components/responses.yaml#/Conflict'
+        '422':
+          $ref: '../components/responses.yaml#/NotEnoughQuestions'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'
+
+  /api/battle/entry:
+    post:
+      tags: [Battle]
+      summary: 배틀룸 입장(상대 플레이어)
+      description: |
+        초대 코드(`roomCode`)로 대기 중인 배틀룸에 입장합니다.  
+        - 이미 2명이면 입장할 수 없습니다.
+        - 이 엔드포인트는 게스트 전용입니다. 방장(host)이 호출한 경우 방 상태만 반환하며 인원 추가는 수행하지 않습니다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomCode]
+              properties:
+                roomCode:
+                  type: string
+                  example: C2R699
+      responses:
+        '200':
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/BattleEntryResponse'
+        '404':
+          description: Room Not Found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: 404_ROOM_NOT_FOUND }
+                  message: { type: string, example: Room not found }
+        '409':
+          description: Room Full
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: 409_ROOM_FULL }
+                  message: { type: string, example: Room already has 2 players }
+        '423':
+          description: Room Locked (Not waiting)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: 423_ROOM_LOCKED }
+                  message: { type: string, example: Room is not in waiting state }
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'
+
+  /api/battle/{sessionId}/answer:
+    post:
+      tags: [Battle]
+      summary: 배틀룸 정답 제출
+      description: |
+        현재 라운드에 정답을 제출합니다.  
+        - 첫 정답 선점자만 해당 라운드의 승자가 됩니다.  
+        - 이미 승자가 있거나 타이머가 만료된 후 제출하면 `result: timeout`으로 응답합니다.  
+        - 오답이면 `hasNext: false`로 현재 라운드를 유지합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [round, answer]
+              properties:
+                round:
+                  type: integer
+                  example: 3
+                answer:
+                  type: string
+                  example: '한 번 도전해 보자'
+      responses:
+        '201':
+          description: Answer judged
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/BattleAnswerResponse'
+        '400':
+          $ref: '../components/responses.yaml#/BadRequest'
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '404':
+          $ref: '../components/responses.yaml#/NotFound'
+        '409':
+          $ref: '../components/responses.yaml#/Conflict'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'
+
+  /api/battle/{sessionId}/result:
+    get:
+      tags: [Battle]
+      summary: 배틀룸 결과 조회
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, example: b_9p1v4t }
+      responses:
+        '200':
+          description: Battle result fetched
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/BattleResultResponse'
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '404':
+          $ref: '../components/responses.yaml#/NotFound'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'
+
+  /api/battle/{sessionId}:
+    get:
+      tags: [Battle]
+      summary: 배틀룸 조회
+      description: |
+        세션의 현재 상태와 라운드/문제/점수 요약을 조회합니다.  
+        - status는 waiting/playing/ended 중 하나입니다.  
+        - playing일 때 현재 라운드의 문제를 포함해 반환합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, example: b_9p1v4t }
+      responses:
+        '200':
+          description: Battle room fetched
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/BattleRoomResponse'
+        '404':
+          description: Room Not Found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: 404_ROOM_NOT_FOUND }
+                  message: { type: string, example: Room not found }
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'
+
+  /api/battle/{sessionId}/delete:
+    delete:
+      tags: [Battle]
+      summary: 배틀룸 세션 삭제
+      description: >
+        사용자가 홈으로 돌아갈 때, 자신의 배틀 세션을 즉시 삭제합니다.
+        (Redis에서 배틀 세션 및 관련 인덱스를 삭제합니다.)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          description: 배틀 세션 ID
+          schema:
+            type: string
+            example: b_ab12cd34
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../components/schemas.yaml#/BattleDeleteResponse'
+        '401':
+          $ref: '../components/responses.yaml#/Unauthorized'
+        '404':
+          $ref: '../components/responses.yaml#/NotFound'
+        '409':
+          $ref: '../components/responses.yaml#/Conflict'
+        '500':
+          $ref: '../components/responses.yaml#/ServerError'

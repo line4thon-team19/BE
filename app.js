@@ -1,24 +1,28 @@
+require('dotenv').config();
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
+const helmet = require('helmet');
 
 const routes = require('./src/routes');
-const notFound = require('./src/middlewares/notFound');
-const errorHandler = require('./src/middlewares/errorHandler');
 
 const app = express();
 
-app.use(cors());
+app.set('trust proxy', 1);
+app.use(helmet());
 app.use(express.json());
-app.use(morgan('dev'));
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-app.get('/', (req, res) => res.send('OK'));
+app.use(cors());
+
+// 헬스체크
+app.get('/healthz', (_req, res) => res.status(200).send('ok'));
+app.get('/readyz', (_req, res) => res.status(200).send('ready'));
+
+// 기본 라우트
+app.get('/', (_req, res) => res.send('OK'));
 
 // API 라우트
 app.use('/api', routes);
-
-// 에러 핸들러
-app.use(notFound);
-app.use(errorHandler);
 
 module.exports = app;
