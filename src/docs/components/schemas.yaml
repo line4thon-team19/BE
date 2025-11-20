@@ -47,7 +47,9 @@ PracticeAnswerRequest:
     answer:
       type: string
       enum: [choice1, choice2]
-  required: [round, answer]
+      nullable: true
+      description: 정답 선택. 시간 초과(auto submit)일 때는 null 또는 필드 생략 가능.
+  required: [round]
 
 # 응답 스키마
 PracticeStartResponse:
