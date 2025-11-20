@@ -10,7 +10,7 @@ const {
 
 const router = express.Router();
 
-// 게스트 인증 
+// 게스트 인증
 const authenticateGuest = require('../middlewares/auth');
 
 function calcCountdown(sess) {
@@ -40,16 +40,15 @@ function recordTimeout(sess) {
   const q = sess.questions?.[idx];
   if (!q) return { isLast: true };
 
-  const already =
-    Array.isArray(sess.answers) && sess.answers.some((a) => a.round === current);
+  const already = Array.isArray(sess.answers) && sess.answers.some((a) => a.round === current);
   if (!already) {
     sess.answers = Array.isArray(sess.answers) ? sess.answers : [];
     sess.answers.push({
       round: current,
       questionId: q.id,
-      answer: 'timeout',         // 구분용 태그
+      answer: 'timeout', // 구분용 태그
       correct: false,
-      reason: 'timeout',         // 결과 조회에서 표시할 때 사용 가능
+      reason: 'timeout', // 결과 조회에서 표시할 때 사용 가능
       answeredAt: new Date().toISOString(),
     });
     sess.wrongCount = (sess.wrongCount ?? 0) + 1;
@@ -93,7 +92,7 @@ router.post('/start', authenticateGuest, express.json(), async (req, res) => {
        FROM PracticeQuestion
        ORDER BY RAND()
        LIMIT ?`,
-      [total]
+      [total],
     );
     if (rows.length < total) {
       return res.status(409).json({ message: `문제가 ${total}개보다 적습니다.` });
@@ -109,7 +108,7 @@ router.post('/start', authenticateGuest, express.json(), async (req, res) => {
       text: q.sentence,
       choice1: q.choice1,
       choice2: q.choice2,
-      answerLabel: q.answerLabel,        // 'choice1' | 'choice2'
+      answerLabel: q.answerLabel, // 'choice1' | 'choice2'
       explanation: q.explanation ?? null,
     }));
 
@@ -141,9 +140,7 @@ router.post('/start', authenticateGuest, express.json(), async (req, res) => {
     }));
 
     const countdown =
-      countdownEndAt != null
-        ? { seconds: Math.ceil((countdownEndAt - now) / 1000) }
-        : undefined;
+      countdownEndAt != null ? { seconds: Math.ceil((countdownEndAt - now) / 1000) } : undefined;
 
     return res.json({
       sessionId,
@@ -164,6 +161,7 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
   try {
     const { sessionId } = req.params;
     const { round, answer } = req.body || {};
+    const isTimeoutSubmit = answer == null;
 
     // round 파싱
     let clientRound = null;
@@ -171,9 +169,11 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     else if (round && typeof round.current === 'number') clientRound = round.current;
 
     if (!Number.isInteger(clientRound) || clientRound < 1) {
-      return res.status(400).json({ message: 'round must be an integer >= 1 or { current: integer }' });
+      return res
+        .status(400)
+        .json({ message: 'round must be an integer >= 1 or { current: integer }' });
     }
-    if (answer !== 'choice1' && answer !== 'choice2') {
+    if (!isTimeoutSubmit && answer !== 'choice1' && answer !== 'choice2') {
       return res.status(400).json({ message: 'answer must be "choice1" or "choice2"' });
     }
 
@@ -199,9 +199,9 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
     const q = sess.questions?.[idx];
     if (!q) return res.status(409).json({ message: 'Round index out of range' });
 
-    // 시간 만료시: 제출값 무시하고 시간초과로 처리 후 바로 다음 라운드 시작
+    // 클라이언트가 timeout으로 보냈거나, 서버 계산상 시간이 0초 이하인 경우
     const remainingTime = calcRemaining(sess);
-    if (remainingTime === 0) {
+    if (isTimeoutSubmit || remainingTime === 0) {
       const { isLast } = recordTimeout(sess);
 
       if (isLast) {
@@ -224,8 +224,12 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
       const nq = sess.questions[sess.round.current - 1];
       await savePracticeSession(sess);
 
+      const newRemaining = calcRemaining(sess);
+
       return res.json({
         round: { current: sess.round.current, total },
+        timeLimit: sess.timeLimit ?? null,
+        remainingTime: newRemaining,
         next: {
           hasNext: true,
           result: 'timeout',
@@ -235,6 +239,7 @@ router.post('/:sessionId/answer', authenticateGuest, express.json(), async (req,
             options: [nq.choice1, nq.choice2],
           },
         },
+        isCorrectByRound: buildIsCorrectByRound(sess),
       });
     }
 
@@ -318,10 +323,10 @@ router.get('/:sessionId/result', authenticateGuest, async (req, res) => {
     const rows = answers.map((a) => {
       const q = (sess.questions || []).find((x) => x.id === a.questionId);
       const correctText = q ? q[q.answerLabel] : null;
-      const pickedText  = q ? q[a.answer]      : null;
+      const pickedText = q ? q[a.answer] : null;
 
       const isTimeout = a.reason === 'timeout';
-      const result = isTimeout ? 'timeout' : (a.correct ? 'correct' : 'wrong');
+      const result = isTimeout ? 'timeout' : a.correct ? 'correct' : 'wrong';
       const answerForResponse = isTimeout ? null : pickedText; // timeout이면 null
 
       return {
@@ -392,8 +397,8 @@ router.get('/:sessionId', authenticateGuest, async (req, res) => {
       // 현재 라운드/타이머 값 갱신
       current = sess.round.current;
 
-      countdown = calcCountdown(sess);      // 보통 null(라운드 중 카운트다운 없음)
-      remainingTime = calcRemaining(sess);  // 새 라운드의 full timeLimit로 갱신됨
+      countdown = calcCountdown(sess); // 보통 null(라운드 중 카운트다운 없음)
+      remainingTime = calcRemaining(sess); // 새 라운드의 full timeLimit로 갱신됨
     }
 
     // ended 응답
