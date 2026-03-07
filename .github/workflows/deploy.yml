@@ -22,8 +22,8 @@ jobs:
 
       - name: Build & Push
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/4thon:latest .
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/4thon:latest
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/hangeul:latest .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/hangeul:latest
 
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
