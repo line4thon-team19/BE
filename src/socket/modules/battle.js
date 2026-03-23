@@ -1,64 +1,72 @@
 const {
-  getSession,
   saveTypingSnapshot,
-  getCorrectAnswer,
-  judgeAndSave,
-  getScoreSummary,
   isRoundActive,
   tickRemainingSec,
   tryHandleTimeoutOnce,
-  getRoundMeta,
-  setRoundPlaying,
-  setEnded,
-  setCorrectFlag,
-  markAnswered,
 } = require('./store');
-const { normalizeText, rateLimiter } = require('./utils');
-const { claimRoundWinner } = require('../../repositories/battleSessionRepo');
-
-const ROOM = (sessionId) => `battle:room:${sessionId}`;
+const { rateLimiter } = require('../../utils/rateLimiter');
+const battleService = require('../../services/battleService');
+const {
+  advanceRoundOrEnd,
+  getBattleScoreSummary,
+  getSession,
+} = require('../../repositories/battleSessionRepo');
+const {
+  BATTLE_ROUND_DURATION_MS,
+  getBattleRoomChannel,
+} = require('../../services/battleHelpers');
 
 const roundTickerMap = new Map();
-const PER_ROUND_MS = 30_000;
 
+// REST 스냅샷에 소켓 전용 점수 요약을 합쳐 반환
 async function makeSnapshot(sessionId) {
-  const sess = await getSession(sessionId);
-  if (!sess) throw new Error('Session not found');
-
-  const status = String(sess.status || 'ENDED').toUpperCase();
-  const round = sess.round || { current: 1, total: 5 };
-
-  let remainingTime = 0;
-  try {
-    const t = await tickRemainingSec(sessionId);
-    if (t && typeof t.remainingSec === 'number') remainingTime = Math.max(0, t.remainingSec);
-  } catch {
-    /* ignore tickRemainingSec error */
-  }
-
-  const summary = await getScoreSummary(sessionId);
-
-  let question = null;
-  if (status === 'PLAYING' && Array.isArray(sess.questions)) {
-    const idx = Math.max(0, Number(round.current || 1) - 1);
-    const q = sess.questions[idx];
-    if (q) {
-      const questionId = q.questionId ?? q.id ?? (typeof q.id === 'number' ? String(q.id) : null);
-      const text = q.text ?? q.correctSentence ?? q.answer ?? null;
-      if (questionId && text) question = { questionId, text };
-    }
-  }
+  const snapshot = await battleService.getBattleRoomSnapshot({ sessionId });
+  const summary = await getBattleScoreSummary(sessionId);
 
   return {
-    status,
-    hostId: sess.hostId || null,
-    round: { current: Number(round.current || 1), total: Number(round.total || 5) },
-    question,
+    ...snapshot,
     summary,
-    remainingTime,
   };
 }
 
+// 현재 배틀 상태를 룸 전체에 다시 전파
+async function broadcastBattleSnapshot(io, sessionId, { previousRound = null } = {}) {
+  const snapshot = await makeSnapshot(sessionId);
+  const room = getBattleRoomChannel(sessionId);
+
+  if (previousRound !== null) {
+    if (snapshot.status === 'ENDED') {
+      io.to(room).emit('battle:round:end', { state: 'ENDED' });
+      stopRoundTicker(sessionId);
+    } else if (Number(snapshot.round?.current || 0) !== Number(previousRound)) {
+      io.to(room).emit('battle:round:next', {
+        round: snapshot.round,
+        remainingSec: snapshot.remainingTime,
+      });
+    }
+  }
+
+  io.to(room).emit('battle:snapshot', snapshot);
+  return snapshot;
+}
+
+// 타임아웃 라운드를 정산
+async function settleTimedOutRound(io, sessionId, roundNo) {
+  const moved = await advanceRoundOrEnd(sessionId, {
+    expectedRound: roundNo,
+    perRoundMs: BATTLE_ROUND_DURATION_MS,
+  });
+
+  if (!moved.ok) {
+    return null;
+  }
+
+  return broadcastBattleSnapshot(io, sessionId, {
+    previousRound: roundNo,
+  });
+}
+
+// 배틀 룸별 라운드 타이머를 시작
 function startRoundTicker(io, sessionId) {
   if (roundTickerMap.has(sessionId)) return;
 
@@ -68,20 +76,29 @@ function startRoundTicker(io, sessionId) {
     try {
       const { remainingSec, round } = await tickRemainingSec(sessionId);
       console.log('[TICK]', sessionId, remainingSec, round.current);
-      if (remainingSec === null || remainingSec === undefined) return;
 
-      if (remainingSec <= 0) {
-        const handled = await tryHandleTimeoutOnce(sessionId, round.current);
-        if (handled) {
-          await advanceRoundWS(io, sessionId);
-          const snap = await makeSnapshot(sessionId);
-          io.to(ROOM(sessionId)).emit('battle:snapshot', snap);
-        }
-        io.to(ROOM(sessionId)).emit('battle:round:ticker', { round, remainingSec: 0 });
+      if (remainingSec === null || remainingSec === undefined) {
         return;
       }
 
-      io.to(ROOM(sessionId)).emit('battle:round:ticker', { round, remainingSec });
+      if (remainingSec <= 0) {
+        const handled = await tryHandleTimeoutOnce(sessionId, round.current);
+
+        if (handled) {
+          await settleTimedOutRound(io, sessionId, round.current);
+        }
+
+        io.to(getBattleRoomChannel(sessionId)).emit('battle:round:ticker', {
+          round,
+          remainingSec: 0,
+        });
+        return;
+      }
+
+      io.to(getBattleRoomChannel(sessionId)).emit('battle:round:ticker', {
+        round,
+        remainingSec,
+      });
     } catch (e) {
       console.warn('[ticker] error:', e?.message || e);
     }
@@ -90,171 +107,141 @@ function startRoundTicker(io, sessionId) {
   roundTickerMap.set(sessionId, intervalId);
 }
 
+// 배틀 룸별 라운드 타이머를 중지
 function stopRoundTicker(sessionId) {
-  const id = roundTickerMap.get(sessionId);
-  if (id) {
-    clearInterval(id);
-    roundTickerMap.delete(sessionId);
-  }
-}
+  const intervalId = roundTickerMap.get(sessionId);
 
-// 라운드 전환
-async function advanceRoundWS(io, sessionId, perRoundMs = PER_ROUND_MS) {
-  const meta = await getRoundMeta(sessionId);
-  const next = meta.current + 1;
-
-  if (next > meta.total) {
-    await setEnded(sessionId);
-    io.to(ROOM(sessionId)).emit('battle:round:end', { state: 'ENDED' });
-    stopRoundTicker(sessionId);
-    return { ended: true };
+  if (!intervalId) {
+    return;
   }
 
-  await setRoundPlaying(sessionId, next, perRoundMs);
-  io.to(ROOM(sessionId)).emit('battle:round:next', {
-    round: { current: next, total: meta.total },
-    remainingSec: Math.ceil(perRoundMs / 1000),
-  });
-  return { ended: false, next };
+  clearInterval(intervalId);
+  roundTickerMap.delete(sessionId);
 }
 
+// 배틀 관련 소켓 이벤트를 등록
 function register(io, socket) {
-  // 배틀룸 참가
+  const typingLimiter = rateLimiter({ windowMs: 100, max: 1 });
+
+  // 플레이어를 배틀 룸에 입장시키고 최신 스냅샷을 내려 줌
   socket.on('battle:join', async (payload, cb) => {
     try {
       const { sessionId } = payload || {};
-      if (!sessionId) throw new Error('sessionId required');
+
+      if (!sessionId) {
+        throw new Error('sessionId required');
+      }
 
       socket.data.battle = {
         sessionId,
-        playerId: socket.data.playerId, // auth 미들웨어에서 이미 넣어줬다고 가정
+        playerId: socket.data.user.playerId,
       };
 
-      await socket.join(ROOM(sessionId));
+      await socket.join(getBattleRoomChannel(sessionId));
 
-      const snap = await makeSnapshot(sessionId);
-      socket.emit('battle:snapshot', snap);
+      const snapshot = await makeSnapshot(sessionId);
+      socket.emit('battle:snapshot', snapshot);
 
-      // 다른 참가자에게 누가 들어왔는지 알림
-      socket.to(ROOM(sessionId)).emit('battle:player_joined', {
-        playerId: socket.data.playerId,
+      socket.to(getBattleRoomChannel(sessionId)).emit('battle:player_joined', {
+        playerId: socket.data.user.playerId,
         ts: Date.now(),
       });
 
       startRoundTicker(io, sessionId);
-      if (cb) cb({ ok: true, you: { playerId: socket.data.playerId } });
+
+      if (cb) {
+        cb({ ok: true, you: { playerId: socket.data.user.playerId } });
+      }
     } catch (err) {
-      if (cb) cb({ ok: false, message: err.message });
+      if (cb) {
+        cb({ ok: false, message: err.message });
+      }
     }
   });
 
-  // 실시간 타이핑
-  const typingLimiter = rateLimiter({ windowMs: 100, max: 1 });
+  // 상대 실시간 타이핑 상태
   socket.on('battle:typing', async (payload = {}) => {
     if (!typingLimiter.allow(socket.id)) return;
+
     try {
       const { sessionId, round, text = '' } = payload;
-      if (!sessionId || typeof round !== 'number') return;
 
-      const ok = await isRoundActive(sessionId, round);
-      if (!ok) return;
-
-      try {
-        await saveTypingSnapshot(sessionId, socket.data.playerId, text);
-      } catch (err) {
-        void err;
-      }
-
-      const preview = text;
-      socket.to(ROOM(sessionId)).emit('battle:typing:update', {
-        playerId: socket.data.playerId,
-        round,
-        preview,
-        len: text.length,
-        ts: Date.now(),
-      });
-    } catch (err) {
-      void err;
-    }
-  });
-
-  // 정답 제출 후 서버 판정
-  socket.on('battle:answer:submit', async (payload = {}, cb) => {
-    try {
-      const { sessionId, round, answerText = '' } = payload;
-      if (!sessionId || typeof round !== 'number' || !answerText.trim()) {
-        throw new Error('Bad payload');
-      }
-      const active = await isRoundActive(sessionId, round);
-      if (!active) throw new Error('Round not active');
-
-      const normalized = normalizeText(answerText);
-      const correctAnswer = await getCorrectAnswer(sessionId, round);
-
-      const { result } = await judgeAndSave({
-        sessionId,
-        round,
-        playerId: socket.data.playerId,
-        normalizedAnswer: normalized,
-        correctAnswer,
-      });
-
-      const summary = await getScoreSummary(sessionId);
-
-      // 방 전체에 즉시 방송(정답 공개 포함)
-      io.to(ROOM(sessionId)).emit('battle:answer:result', {
-        playerId: socket.data.playerId,
-        round,
-        result,
-        correctAnswer,
-        summary, // [{playerId, score, wrong}]
-        ts: Date.now(),
-      });
-
-      if (result === 'correct') {
-        // 정답을 맞추면
-        // 1) 라운드 승자를 1회만 기록 (REST 조회용)
-        // 2) 정답 플래그 세팅
-        // 3) 잠깐 보여준 뒤 다음 라운드로 전환
-        try {
-          try {
-            await claimRoundWinner(sessionId, round, socket.data.playerId);
-          } catch (e) {
-            console.warn('[answer] claimRoundWinner failed:', e?.message || e);
-          }
-
-          await setCorrectFlag(sessionId, round);
-
-          setTimeout(async () => {
-            try {
-              await advanceRoundWS(io, sessionId);
-              const snap = await makeSnapshot(sessionId);
-              io.to(ROOM(sessionId)).emit('battle:snapshot', snap);
-            } catch (e) {
-              console.warn('[answer->advance] failed:', e?.message || e);
-            }
-          }, 900);
-        } catch (e) {
-          console.warn('[answer] correct-flow failed:', e?.message || e);
-        }
-
-        if (cb) cb({ ok: true, result });
+      if (!sessionId || typeof round !== 'number') {
         return;
       }
 
-      // 오답이면 계속 제출 가능. 타임아웃 또는 누군가 정답일 때만 전환
-      try {
-        await markAnswered(sessionId, round, socket.data.playerId);
-      } catch (e) {
-        console.warn('[answer] markAnswered failed:', e?.message || e);
+      const active = await isRoundActive(sessionId, round);
+      if (!active) {
+        return;
       }
 
-      if (cb) cb({ ok: true, result });
-    } catch (err) {
-      if (cb) cb({ ok: false, message: err.message });
+      await saveTypingSnapshot(sessionId, socket.data.user.playerId, text);
+
+      socket.to(getBattleRoomChannel(sessionId)).emit('battle:typing:update', {
+        playerId: socket.data.user.playerId,
+        round,
+        preview: text,
+        len: text.length,
+        ts: Date.now(),
+      });
+    } catch (_error) {
+      return;
     }
   });
 
+  // 제출 답안을 공용 서비스로 판정한 뒤 결과를 전달
+  socket.on('battle:answer:submit', async (payload = {}, cb) => {
+    try {
+      const { sessionId, round, answerText = '' } = payload;
+
+      if (!sessionId || typeof round !== 'number' || !answerText.trim()) {
+        throw new Error('Bad payload');
+      }
+
+      const active = await isRoundActive(sessionId, round);
+      if (!active) {
+        throw new Error('Round not active');
+      }
+
+      const submission = await battleService.submitBattleAnswerAttempt({
+        sessionId,
+        round,
+        answerText,
+        playerId: socket.data.user.playerId,
+      });
+
+      if (submission.statusCode >= 400) {
+        throw new Error(submission.data?.message || 'Failed to submit answer');
+      }
+
+      const summary = await getBattleScoreSummary(sessionId);
+
+      io.to(getBattleRoomChannel(sessionId)).emit('battle:answer:result', {
+        playerId: socket.data.user.playerId,
+        round,
+        result: submission.data.result,
+        state: submission.data.state,
+        winner: submission.data.winner,
+        correctAnswer: submission.data.correctAnswer,
+        summary,
+        ts: Date.now(),
+      });
+
+      await broadcastBattleSnapshot(io, sessionId, {
+        previousRound: round,
+      });
+
+      if (cb) {
+        cb({ ok: true, ...submission.data });
+      }
+    } catch (err) {
+      if (cb) {
+        cb({ ok: false, message: err.message });
+      }
+    }
+  });
+
+  // 아직 끝나지 않은 배틀이면 상대에게 연결 종료 알림
   socket.on('disconnect', async () => {
     const battle = socket.data.battle;
     if (!battle) return;
@@ -267,19 +254,16 @@ function register(io, socket) {
       playerId,
     });
 
-    // 이미 끝난 세션이면 알림 안보냄
     try {
-      const sess = await getSession(sessionId);
-      if (!sess) return;
-      if (String(sess.status || 'ENDED').toUpperCase() === 'ENDED') {
-        return;
-      }
-    } catch (e) {
+      const session = await getSession(sessionId);
+
+      if (!session) return;
+      if (String(session.status || 'ENDED').toUpperCase() === 'ENDED') return;
+    } catch (_error) {
       return;
     }
 
-    // 같은 배틀룸에 남아있는 상대에게 알림 방송
-    socket.to(ROOM(sessionId)).emit('battle:opponent_disconnected', {
+    socket.to(getBattleRoomChannel(sessionId)).emit('battle:opponent_disconnected', {
       playerId,
       ts: Date.now(),
       message: '상대방의 연결이 끊어졌습니다.',
