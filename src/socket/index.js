@@ -1,4 +1,5 @@
 const { Server } = require('socket.io');
+const authenticateGuest = require('../middlewares/auth');
 const battleSocket = require('./modules/battle');
 
 function parseOrigins(envValue) {
@@ -39,12 +40,11 @@ function initSocket(httpServer) {
 
   io.use(async (socket, next) => {
     try {
-      const raw = socket.handshake.auth?.playerId;
-      const safe =
-        typeof raw === 'string' && raw.trim().length > 0
-          ? raw.trim().slice(0, 40)
-          : `plr_${socket.id.slice(-6)}`;
-      socket.data.playerId = safe;
+      const token = authenticateGuest.resolveSocketToken(socket);
+      const user = authenticateGuest.verifyGuestToken(token);
+
+      socket.data.user = user;
+      socket.data.playerId = user.playerId;
 
       return next();
     } catch (e) {

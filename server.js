@@ -1,7 +1,6 @@
 require('dotenv').config();
 const http = require('http');
 const path = require('path');
-// const { Server } = require('socket.io');
 const { initSocket } = require('./src/socket');
 
 const swaggerUi = require('swagger-ui-express');
@@ -14,6 +13,21 @@ const app = require('./app');
 
 const PORT = Number(process.env.PORT || 3000);
 const ENABLE_SWAGGER = String(process.env.ENABLE_SWAGGER).toLowerCase() === 'true';
+
+async function warmUpDependencies() {
+  if (typeof app.locals.getDependencyReadiness !== 'function') {
+    return;
+  }
+
+  const readiness = await app.locals.getDependencyReadiness();
+
+  if (readiness.ready) {
+    console.log('[Ready] dependencies ready at startup');
+    return;
+  }
+
+  console.warn('[Ready] dependencies not ready at startup:', readiness.dependencies);
+}
 
 (async () => {
   try {
@@ -53,23 +67,11 @@ const ENABLE_SWAGGER = String(process.env.ENABLE_SWAGGER).toLowerCase() === 'tru
   app.use(notFound);
   app.use(errorHandler);
 
-  // HTTP + Socket.IO
   const server = http.createServer(app);
-  // const io = new Server(server, {
-  //   cors: { origin: '*', methods: ['GET', 'POST'] },
-  // });
-  // app.locals.io = io;
-
-  // io.on('connection', (socket) => {
-  //   console.log('[socket.io] connected:', socket.id);
-  //   socket.on('disconnect', (reason) => {
-  //     console.log('[socket.io] disconnected:', socket.id, 'reason:', reason);
-  //   });
-  // });
-
-  // initSocket 안에서 io를 만들고, 그 io를 되돌려 받자
   const io = initSocket(server);
   app.locals.io = io;
+
+  await warmUpDependencies();
 
   server.listen(PORT, () => {
     console.log(`Server listening on http://localhost:${PORT}`);

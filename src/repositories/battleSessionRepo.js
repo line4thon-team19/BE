@@ -1,16 +1,41 @@
 const { getRedis, isRedisReady } = require('../libs/redisClient');
 const keys = require('../utils/keys');
+const { syncBattleRealtimeState } = require('../services/battleHelpers');
 
 const TTL = parseInt(process.env.BATTLE_SESSION_TTL_SEC || '86400', 10);
 
-// 고유 roomCode 여부 검사
+// Redis 점수 해시를 플레이어별 점수/오답 묶음으로 정리
+function buildBattleScoreBoard(rawScoreHash = {}) {
+  const scoreBoard = {};
+
+  Object.entries(rawScoreHash).forEach(([field, value]) => {
+    const [playerId, kind = 'score'] = field.split(':');
+
+    if (!playerId) return;
+
+    if (!scoreBoard[playerId]) {
+      scoreBoard[playerId] = { score: 0, wrong: 0 };
+    }
+
+    if (kind === 'wrong') {
+      scoreBoard[playerId].wrong += Number(value || 0);
+      return;
+    }
+
+    scoreBoard[playerId].score += Number(value || 0);
+  });
+
+  return scoreBoard;
+}
+
+// 방 코드가 이미 다른 세션에 연결되어 있는지 확인
 async function existsRoomCode(roomCode) {
   const redis = await getRedis();
   const sid = await redis.get(keys.battleRoomCode(roomCode));
   return Boolean(sid);
 }
 
-// 세션 생성(세션 JSON + 룸코드 인덱스 저장)
+// 배틀 세션 본문과 방 코드 인덱스를 함께 저장
 async function createSession(session) {
   const redis = await getRedis();
   if (!isRedisReady()) throw new Error('Redis not ready');
@@ -29,7 +54,7 @@ async function createSession(session) {
   return session;
 }
 
-// 세션 조회
+// 배틀 세션 JSON 본문을 조회
 async function getSession(sessionId) {
   const redis = await getRedis();
   const key = keys.battleSession(sessionId);
@@ -37,7 +62,7 @@ async function getSession(sessionId) {
   return raw ? JSON.parse(raw) : null;
 }
 
-// 세션 부분 업데이트
+// 부분 patch를 기존 세션에 병합해 저장
 async function updateSession(sessionId, patch) {
   const redis = await getRedis();
   if (!isRedisReady()) throw new Error('Redis not ready');
@@ -47,36 +72,58 @@ async function updateSession(sessionId, patch) {
   if (!raw) return null;
 
   const current = JSON.parse(raw);
-  const next = { ...current, ...patch };
+
+  const next = {
+    ...current,
+    ...patch,
+    round: patch.round
+      ? {
+        ...(current.round || {}),
+        ...patch.round,
+      }
+      : current.round,
+    countdown: patch.countdown
+      ? {
+        ...(current.countdown || {}),
+        ...patch.countdown,
+      }
+      : current.countdown,
+  };
+
   await redis.multi().set(key, JSON.stringify(next)).expire(key, TTL).exec();
   return next;
 }
 
+// 방 코드로 세션 ID를 역조회
 async function getSessionIdByRoomCode(roomCode) {
   const redis = await getRedis();
   const sid = await redis.get(keys.battleRoomCode(roomCode));
   return sid || null;
 }
 
+// 플레이 중 판정에 필요한 최소 세션 정보를 모아 반환
 async function getSessionBasicForPlay(sessionId) {
   const s = await getSession(sessionId);
   if (!s) return null;
 
   const currentRound = Number(s?.round?.current || 1);
-  let correctAnswer = s.correctAnswer;
-  // Redis 라운드 해시에 저장된 정답을 우선으로 사용
+  let correctAnswer = s.correctAnswer || '';
+
   try {
     const redis = await getRedis();
-    const redisAns = await redis.hGet(keys.battleRoundAnswer(sessionId, currentRound), 'answer');
+    const redisAns = await redis.hGet(
+      keys.battleRoundAnswer(sessionId, currentRound),
+      'answer',
+    );
     if (redisAns) correctAnswer = redisAns;
   } catch (e) {
-    // Redis 조회 실패 시 무시하고 fallback
+    // fallback
   }
-  // 세션 JSON의 questions는 보조(fallback)
+
   if (!correctAnswer && Array.isArray(s.questions)) {
     const q = s.questions[currentRound - 1];
     if (q?.correctSentence) correctAnswer = q.correctSentence;
-    if (!correctAnswer && q?.text) correctAnswer = q.text;
+    else if (q?.text) correctAnswer = q.text;
   }
 
   return {
@@ -84,104 +131,225 @@ async function getSessionBasicForPlay(sessionId) {
     status: s.status,
     roomCode: s.roomCode,
     hostId: s.hostId,
-    round: s.round || { current: 1, total: 5 },
+    round: {
+      current: Number(s?.round?.current || 1),
+      total: Number(s?.round?.total || 5),
+    },
     correctAnswer: correctAnswer || '',
-    deadlineAt: s.deadlineAt || null,
+    deadlineAt: Number(s?.deadlineAt || 0) || null,
   };
 }
 
-// 라운드 별 기록
-async function savePlayerAnswer(sessionId, round, playerId, answer) {
+// 특정 라운드의 마지막 제출 답안과 판정 결과를 저장
+async function saveBattleRoundAnswer(sessionId, round, playerId, { answer, result } = {}) {
   const redis = await getRedis();
   const key = keys.battleRoundAnswer(sessionId, round);
   const ts = Date.now().toString();
-  await redis.hSet(key, `lastAnswer:${playerId}`, String(answer ?? ''));
-  await redis.hSet(key, `lastSubmittedAt:${playerId}`, ts);
+  const payload = {
+    [`lastAnswer:${playerId}`]: String(answer ?? ''),
+    [`lastSubmittedAt:${playerId}`]: ts,
+  };
+
+  if (typeof result === 'string' && result) {
+    payload[`result:${playerId}`] = result;
+  }
+
+  await redis.hSet(key, payload);
+  await redis.expire(key, TTL);
 }
 
+// 특정 플레이어의 라운드별 마지막 제출 내용과 정답 여부를 읽어옵니다.
+async function getBattleRoundPlayerAnswer(sessionId, round, playerId) {
+  const redis = await getRedis();
+  const wsAnswerKey = `${keys.battleRoundAnswer(sessionId, round)}:answer:${playerId}`;
+  const wsAnswer = await redis.hGetAll(wsAnswerKey);
+
+  if (wsAnswer && Object.keys(wsAnswer).length) {
+    const text = wsAnswer.text ?? null;
+    const result = wsAnswer.result ?? null;
+    const isCorrect = result === 'correct';
+
+    return {
+      lastAnswer: text,
+      isCorrect,
+    };
+  }
+
+  const [text, result] = await redis.hmGet(keys.battleRoundAnswer(sessionId, round), [
+    `lastAnswer:${playerId}`,
+    `result:${playerId}`,
+  ]);
+
+  return {
+    lastAnswer: text ?? null,
+    isCorrect: result === 'correct',
+  };
+}
+
+// 라운드 승자를 조회
 async function getRoundWinner(sessionId, round) {
   const redis = await getRedis();
   return redis.get(keys.battleRoundWinner(sessionId, round));
 }
 
+// 아직 승자가 없을 때만 라운드 승자를 선점
 async function claimRoundWinner(sessionId, round, playerId) {
   const redis = await getRedis();
   const key = keys.battleRoundWinner(sessionId, round);
-  const ok = await redis.setNX(key, playerId);
-  if (ok) await redis.pExpire(key, 2 * 60 * 1000);
+
+  const ok = await redis.set(key, playerId, {
+    NX: true,
+    PX: 2 * 60 * 1000,
+  });
+
   return !!ok;
 }
 
+// 플레이어 점수를 누적
 async function addScore(sessionId, playerId, delta = 1) {
   const redis = await getRedis();
-  // WS(judgeAndSave)와 동일 스키마로 통일: playerId:score
-  await redis.hIncrBy(keys.battleScore(sessionId), `${playerId}:score`, delta);
-  await redis.expire(keys.battleScore(sessionId), TTL);
+  const scoreKey = keys.battleScore(sessionId);
+
+  await redis.hIncrBy(scoreKey, `${playerId}:score`, delta);
+  await redis.expire(scoreKey, TTL);
 }
 
-async function advanceRoundOrEnd(sessionId, { perRoundMs = 0 } = {}) {
+// 플레이어의 오답 제출 횟수를 누적
+async function addWrongAttempt(sessionId, playerId, delta = 1) {
   const redis = await getRedis();
-  const key = keys.battleSession(sessionId);
-  const raw = await redis.get(key);
-  if (!raw) return null;
+  const scoreKey = keys.battleScore(sessionId);
 
-  const s = JSON.parse(raw);
-  const cur = Number(s?.round?.current || 1);
-  const tot = Number(s?.round?.total || 5);
+  await redis.hIncrBy(scoreKey, `${playerId}:wrong`, delta);
+  await redis.expire(scoreKey, TTL);
+}
 
-  // 다음 라운드 존재
-  if (cur < tot) {
-    const nextRound = cur + 1;
-    const deadlineAt = perRoundMs > 0 ? Date.now() + perRoundMs : null;
-    const next = {
-      ...s,
-      round: { current: nextRound, total: tot },
-      deadlineAt,
+// 현재 라운드를 다음 라운드로 넘기거나 세션을 종료
+async function advanceRoundOrEnd(sessionId, { expectedRound, perRoundMs }) {
+  const base = await getSessionBasicForPlay(sessionId);
+
+  if (!base) {
+    return {
+      ok: false,
+      reason: 'SESSION_NOT_FOUND',
+      ended: false,
     };
-    await redis.multi().set(key, JSON.stringify(next)).expire(key, TTL).exec();
-    return { advanced: true, ended: false, nextState: 'playing', nextRound };
   }
 
-  // 마지막 라운드 종료
-  const next = {
-    ...s,
-    status: 'ended',
-    endedAt: new Date().toISOString(),
-    deadlineAt: null,
+  const status = String(base.status || 'waiting').toLowerCase();
+  const currentRound = Number(base?.round?.current || 1);
+  const totalRounds = Number(base?.round?.total || 5);
+
+  if (status !== 'playing') {
+    return {
+      ok: true,
+      ended: status === 'ended',
+      alreadySettled: true,
+      currentRound,
+      totalRounds,
+      status,
+    };
+  }
+
+  if (Number(expectedRound) !== currentRound) {
+    return {
+      ok: true,
+      ended: false,
+      alreadySettled: true,
+      currentRound,
+      totalRounds,
+      status,
+    };
+  }
+
+  if (currentRound >= totalRounds) {
+    await updateSession(sessionId, {
+      status: 'ended',
+      deadlineAt: null,
+      round: {
+        current: currentRound,
+        total: totalRounds,
+      },
+    });
+
+    await syncBattleRealtimeState({
+      sessionId,
+      ended: true,
+      nextRoundNumber: currentRound,
+      perRoundMs,
+    });
+
+    return {
+      ok: true,
+      ended: true,
+      alreadySettled: false,
+      currentRound,
+      totalRounds,
+      status: 'ended',
+    };
+  }
+
+  const nextRoundNumber = currentRound + 1;
+  const nextDeadlineAt = Date.now() + perRoundMs;
+
+  await updateSession(sessionId, {
+    status: 'playing',
+    deadlineAt: nextDeadlineAt,
+    round: {
+      current: nextRoundNumber,
+      total: totalRounds,
+    },
+  });
+
+  await syncBattleRealtimeState({
+    sessionId,
+    ended: false,
+    nextRoundNumber,
+    perRoundMs,
+  });
+
+  return {
+    ok: true,
+    ended: false,
+    alreadySettled: false,
+    currentRound: nextRoundNumber,
+    totalRounds,
+    status: 'playing',
+    deadlineAt: nextDeadlineAt,
   };
-  await redis.multi().set(key, JSON.stringify(next)).expire(key, TTL).exec();
-  return { advanced: false, ended: true, nextState: 'ended', nextRound: tot };
 }
 
-// 세션별 점수 조회 (WS + REST 통합)
-// - WS:  plr123:score, plr123:wrong
-// - REST: plr123 (점수)
-// 최종적으로 { plr123: scoreNumber } 형태로 리턴
+// 플레이어별 점수만 단순 맵 형태로 반환
 async function getScores(sessionId) {
   const redis = await getRedis();
   const h = await redis.hGetAll(keys.battleScore(sessionId));
   if (!h || !Object.keys(h).length) return {};
 
+  const scoreBoard = buildBattleScoreBoard(h);
   const out = {};
 
-  Object.entries(h).forEach(([key, val]) => {
-    const [pid, kind] = key.split(':');
-
-    if (!kind) {
-      out[pid] = (out[pid] || 0) + Number(val || 0);
-      return;
-    }
-
-    if (kind === 'score') {
-      out[pid] = (out[pid] || 0) + Number(val || 0);
-      return;
-    }
+  Object.entries(scoreBoard).forEach(([playerId, scoreRow]) => {
+    out[playerId] = scoreRow.score;
   });
 
   return out;
 }
 
-// 배틀 세션 및 관련 Redis 키 삭제
+// 플레이어별 점수와 오답 횟수를 요약 배열로 반환
+async function getBattleScoreSummary(sessionId) {
+  const redis = await getRedis();
+  const h = await redis.hGetAll(keys.battleScore(sessionId));
+  if (!h || !Object.keys(h).length) return [];
+
+  const scoreBoard = buildBattleScoreBoard(h);
+
+  return Object.entries(scoreBoard).map(([playerId, scoreRow]) => ({
+    playerId,
+    score: scoreRow.score,
+    wrong: scoreRow.wrong,
+  }));
+}
+
+// 세션 본문과 관련 보조 키를 한 번에 제거
 async function deleteSession(sessionId) {
   const redis = await getRedis();
   if (!isRedisReady()) throw new Error('Redis not ready');
@@ -193,22 +361,20 @@ async function deleteSession(sessionId) {
   const s = JSON.parse(raw);
   const pipeline = redis.multi();
 
-  // 세션 본문 삭제
   pipeline.del(key);
 
-  // roomCode 인덱스 삭제
   if (s.roomCode) {
     pipeline.del(keys.battleRoomCode(s.roomCode));
   }
 
-  // 점수 해시 삭제
   pipeline.del(keys.battleScore(sessionId));
+  pipeline.del(keys.battleSessionState(sessionId));
 
-  // 라운드별 정답/승자 키 삭제
   const totalRounds = Number(s?.round?.total || 0);
   for (let round = 1; round <= totalRounds; round += 1) {
     pipeline.del(keys.battleRoundAnswer(sessionId, round));
     pipeline.del(keys.battleRoundWinner(sessionId, round));
+    pipeline.del(`${keys.battleRoundAnswer(sessionId, round)}:answered`);
   }
 
   await pipeline.exec();
@@ -222,11 +388,14 @@ module.exports = {
   updateSession,
   getSessionIdByRoomCode,
   getSessionBasicForPlay,
-  savePlayerAnswer,
+  saveBattleRoundAnswer,
+  getBattleRoundPlayerAnswer,
   getRoundWinner,
   claimRoundWinner,
   addScore,
+  addWrongAttempt,
   advanceRoundOrEnd,
   getScores,
+  getBattleScoreSummary,
   deleteSession,
 };
