@@ -33,10 +33,118 @@ const { getRedis } = require('../libs/redisClient');
 
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://hyunseoko.store';
 
-const toSTATE = (status) => String(status || '').toUpperCase();
+const toUpperStatus = (status) => String(status || '').toUpperCase();
+const toStatusValue = (status) => String(status || '').toLowerCase();
+
+function buildBattleQuestionPayload(question) {
+  if (!question) return null;
+
+  const questionIdRaw =
+    question.questionId ??
+    question.id ??
+    (typeof question.id === 'number' ? String(question.id) : null);
+  const text = question.text ?? question.answer ?? question.correctSentence ?? null;
+
+  if (!questionIdRaw || !text) {
+    return null;
+  }
+
+  return {
+    questionId: String(questionIdRaw),
+    text,
+    explanation: question.explanation ?? null,
+  };
+}
 
 // 배틀룸 조회 결과(소켓에서 재사용할 수 있게)
-async function getBattleRoomSnapshot({ sessionId }) {
+async function buildBattleAnswerSummary({
+  sessionId,
+  playerId,
+  current,
+  total,
+  state,
+}) {
+  if (!sessionId || !playerId || !Number.isInteger(total) || total <= 0) {
+    return [];
+  }
+
+  const normalizedState = toUpperStatus(state);
+  const rounds = Array.from({ length: total }, (_, idx) => idx + 1);
+  const [winners, answers] = await Promise.all([
+    Promise.all(rounds.map((roundNo) => getRoundWinner(sessionId, roundNo))),
+    Promise.all(rounds.map((roundNo) => getBattleRoundPlayerAnswer(sessionId, roundNo, playerId))),
+  ]);
+
+  const isCorrectByRound = rounds.map((roundNo, idx) => {
+    const winner = winners[idx];
+    if (winner) {
+      return winner === playerId;
+    }
+
+    if (normalizedState === 'ENDED' || roundNo < current) {
+      return false;
+    }
+
+    if (roundNo > current) {
+      return null;
+    }
+
+    const result = answers[idx]?.result ?? null;
+    if (result === 'correct') return true;
+    if (result === 'wrong' || result === 'timeout' || result === 'already_won') {
+      return false;
+    }
+
+    return null;
+  });
+
+  return [
+    {
+      playerId,
+      isCorrectByRound,
+    },
+  ];
+}
+
+async function buildBattleAnswerResponseWithSummary({
+  sessionId,
+  roomCode,
+  current,
+  total,
+  hasNext,
+  state,
+  result,
+  winner = null,
+  correctAnswer = null,
+  playerId,
+  submittedText = null,
+}) {
+  const summary = await buildBattleAnswerSummary({
+    sessionId,
+    playerId,
+    current,
+    total,
+    state,
+  });
+
+  return buildBattleAnswerResponse({
+    sessionId,
+    roomCode,
+    current,
+    total,
+    hasNext,
+    state,
+    result,
+    isCorrect: result === 'correct',
+    winner,
+    correctAnswer,
+    playerId,
+    submittedText,
+    summary,
+  });
+}
+
+async function getBattleRoomSnapshot({ sessionId } = {}) {
   const result = await getBattleRoom({ sessionId });
 
   if (result.statusCode !== 200) {
@@ -97,6 +205,7 @@ async function createRoom({ body, user }) {
       roomCode,
       status,
       hostId,
+      players: [{ playerId: hostId, isHost: true }],
       inviteLink,
       createdAt: new Date().toISOString(),
     };
@@ -108,7 +217,7 @@ async function createRoom({ body, user }) {
       data: {
         sessionId,
         roomCode,
-        status,
+        state: status,
         hostId,
         inviteLink,
       },
@@ -125,27 +234,55 @@ async function createRoom({ body, user }) {
 // 카운트다운 시작(방장만 가능)
 async function startCountdown({ sessionId, body, user, io }) {
   try {
-    const countdownSec = Math.max(1, Math.min(10, Number(body?.seconds || 3)));
+    const countdownSec = Number(body?.countdownSec ?? body?.seconds ?? 3);
+    if (!Number.isInteger(countdownSec) || countdownSec < 0 || countdownSec > 30) {
+      return {
+        statusCode: 400,
+        data: { message: 'countdownSec must be integer 0~30' },
+      };
+    }
 
     const session = await getSession(sessionId);
     if (!session) {
       return {
         statusCode: 404,
-        data: { message: 'Session not found or expired' },
+        data: { message: 'Session not found' },
       };
     }
 
-    if (session.hostId !== user?.playerId) {
+    if (user?.playerId !== session.hostId) {
       return {
         statusCode: 403,
-        data: { message: 'Only host can start countdown' },
+        data: { message: '방장만 카운트다운을 시작할 수 있습니다.' },
       };
     }
 
-    if (String(session.status || '').toLowerCase() !== 'waiting') {
+    const playersArr = Array.isArray(session.players) ? session.players : [];
+    const normalizedPlayers =
+      playersArr.length > 0
+        ? playersArr
+        : session.hostId
+          ? [{ playerId: session.hostId, isHost: true }]
+          : [];
+
+    if (normalizedPlayers.length < 2) {
       return {
         statusCode: 409,
-        data: { message: 'Session is not in waiting state' },
+        data: { message: '상대 플레이어 입장 후 시작할 수 있습니다.' },
+      };
+    }
+
+    if (session.status !== 'waiting') {
+      return {
+        statusCode: 409,
+        data: { message: `'${session.status}'일 때는 시작할 수 없습니다.` },
+      };
+    }
+
+    if (session.countdown?.inProgress) {
+      return {
+        statusCode: 409,
+        data: { message: '카운트다운이 이미 시작되었습니다.' },
       };
     }
 
@@ -159,9 +296,11 @@ async function startCountdown({ sessionId, body, user, io }) {
       };
     }
 
-    const totalRounds = uniq.length;
     const nowIso = new Date().toISOString();
-    const round = { current: 1, total: totalRounds };
+    const normalizedQuestions = uniq
+      .map((question) => buildBattleQuestionPayload(question))
+      .filter(Boolean);
+    const round = session.round ?? { current: 1, total: normalizedQuestions.length };
 
     const patched = await updateSession(sessionId, {
       countdown: {
@@ -169,8 +308,8 @@ async function startCountdown({ sessionId, body, user, io }) {
         startedAt: nowIso,
         inProgress: true,
       },
-      questions: uniq,
-      round,
+      questions: normalizedQuestions,
+      round: session.round ?? { current: 1, total: normalizedQuestions.length },
     });
 
     if (!patched) {
@@ -184,16 +323,16 @@ async function startCountdown({ sessionId, body, user, io }) {
 
     await r.hSet(keys.battleSessionState(sessionId), {
       state: 'WAITING',
-      roundCurrent: '1',
-      roundTotal: String(totalRounds),
+      roundCurrent: String(round.current ?? 1),
+      roundTotal: String(round.total ?? normalizedQuestions.length),
       roundEndsAt: '',
     });
     await r.expire(keys.battleSessionState(sessionId), 60 * 60 * 2);
 
-    for (let i = 0; i < uniq.length; i += 1) {
+    for (let i = 0; i < normalizedQuestions.length; i += 1) {
       const roundNo = i + 1;
-      const q = uniq[i];
-      const rawAnswer = q.correctSentence ?? q.answer ?? q.text ?? '';
+      const q = normalizedQuestions[i];
+      const rawAnswer = q.answer ?? q.correctSentence ?? q.text ?? '';
 
       await r.hSet(keys.battleRoundAnswer(sessionId, roundNo), {
         answer: normalizeText(rawAnswer),
@@ -213,13 +352,14 @@ async function startCountdown({ sessionId, body, user, io }) {
         const latest = await getSession(sessionId);
         if (!latest) return;
 
-        if (String(latest.status || '').toLowerCase() !== 'waiting') return;
+        if (latest.status !== 'waiting' || !latest.countdown?.inProgress) return;
 
-        const roundTotal = Number(latest?.round?.total || totalRounds);
+        const roundTotal = Number(latest?.round?.total || normalizedQuestions.length);
         const deadlineAt = Date.now() + BATTLE_ROUND_DURATION_MS;
 
         await updateSession(sessionId, {
           status: 'playing',
+          startedAt: new Date().toISOString(),
           deadlineAt,
           countdown: {
             ...(latest.countdown || {}),
@@ -259,12 +399,11 @@ async function startCountdown({ sessionId, body, user, io }) {
     return {
       statusCode: 200,
       data: {
-        sessionId,
-        countdown: {
-          seconds: countdownSec,
-          startedAt: nowIso,
-        },
+        started: true,
+        state: 'waiting',
+        countdown: { seconds: countdownSec },
         round,
+        questions: normalizedQuestions,
       },
     };
   } catch (err) {
@@ -329,7 +468,7 @@ async function entryRoom({ body, user, io }) {
         data: {
           sessionId,
           roomCode: session.roomCode,
-          state: 'WAITING',
+          state: 'waiting',
           players,
         },
       };
@@ -341,7 +480,7 @@ async function entryRoom({ body, user, io }) {
         data: {
           sessionId,
           roomCode: session.roomCode,
-          state: 'WAITING',
+          state: 'waiting',
           players,
         },
       };
@@ -389,7 +528,7 @@ async function entryRoom({ body, user, io }) {
       data: {
         sessionId,
         roomCode: patched.roomCode,
-        state: 'WAITING',
+        state: 'waiting',
         players: patched.players,
       },
     };
@@ -471,16 +610,18 @@ async function submitAnswer({ sessionId, body, user }) {
       });
       await addWrongAttempt(sessionId, playerId, 1);
 
-      return buildBattleAnswerResponse({
+      return buildBattleAnswerResponseWithSummary({
         sessionId,
         roomCode,
         current: currentRound,
         total: totalRounds,
         hasNext: false,
-        state: toSTATE(status),
+        state: toUpperStatus(status),
         result: 'wrong',
         winner: null,
         correctAnswer: null,
+        playerId,
+        submittedText: answer,
       });
     }
 
@@ -509,7 +650,7 @@ async function submitAnswer({ sessionId, body, user }) {
         result,
       });
 
-      return buildBattleAnswerResponse({
+      return buildBattleAnswerResponseWithSummary({
         sessionId,
         roomCode: latest.roomCode,
         current: latestRound,
@@ -519,6 +660,8 @@ async function submitAnswer({ sessionId, body, user }) {
         result,
         winner: winner || null,
         correctAnswer: winner ? latest.correctAnswer : null,
+        playerId,
+        submittedText: answer,
       });
     }
 
@@ -548,7 +691,7 @@ async function submitAnswer({ sessionId, body, user }) {
         result,
       });
 
-      return buildBattleAnswerResponse({
+      return buildBattleAnswerResponseWithSummary({
         sessionId,
         roomCode: lockedRoomCode,
         current: lockedCurrentRound,
@@ -558,6 +701,8 @@ async function submitAnswer({ sessionId, body, user }) {
         result,
         winner: winner || null,
         correctAnswer: lockedCorrectAnswer,
+        playerId,
+        submittedText: answer,
       });
     }
 
@@ -569,7 +714,7 @@ async function submitAnswer({ sessionId, body, user }) {
         result: 'already_won',
       });
 
-      return buildBattleAnswerResponse({
+      return buildBattleAnswerResponseWithSummary({
         sessionId,
         roomCode: lockedRoomCode,
         current: currentRound,
@@ -579,6 +724,8 @@ async function submitAnswer({ sessionId, body, user }) {
         result: 'already_won',
         winner: existingWinner,
         correctAnswer: lockedCorrectAnswer,
+        playerId,
+        submittedText: answer,
       });
     }
 
@@ -597,7 +744,7 @@ async function submitAnswer({ sessionId, body, user }) {
       });
       await addWrongAttempt(sessionId, playerId, 1);
 
-      return buildBattleAnswerResponse({
+      return buildBattleAnswerResponseWithSummary({
         sessionId,
         roomCode: lockedRoomCode,
         current: currentRound,
@@ -607,6 +754,8 @@ async function submitAnswer({ sessionId, body, user }) {
         result: 'wrong',
         winner: null,
         correctAnswer: null,
+        playerId,
+        submittedText: answer,
       });
     }
 
@@ -651,7 +800,7 @@ async function submitAnswer({ sessionId, body, user }) {
     const finalCurrentRound = Number(finalBase?.round?.current || moved.currentRound || currentRound);
     const finalTotalRounds = Number(finalBase?.round?.total || lockedTotalRounds);
 
-    return buildBattleAnswerResponse({
+    return buildBattleAnswerResponseWithSummary({
       sessionId,
       roomCode: finalRoomCode,
       current: finalCurrentRound,
@@ -661,6 +810,8 @@ async function submitAnswer({ sessionId, body, user }) {
       result,
       winner,
       correctAnswer: lockedCorrectAnswer,
+      playerId,
+      submittedText: answer,
     });
   } catch (err) {
     console.error('[submitAnswer] error:', err);
@@ -689,9 +840,6 @@ async function getBattleResult({ sessionId, user }) {
     let players = Array.isArray(session.players) ? session.players.slice() : [];
     if (!players.length && session.hostId) {
       players = [{ playerId: session.hostId, isHost: true }];
-    }
-    if (session.guestId && !players.some((p) => p.playerId === session.guestId)) {
-      players.push({ playerId: session.guestId, isHost: false });
     }
     if (!players.length) {
       return {
@@ -722,11 +870,15 @@ async function getBattleResult({ sessionId, user }) {
       const playersOut = [];
 
       if (you) {
+        const me = players.find((p) => p.playerId === you) || { playerId: you, isHost: false };
         const { lastAnswer, isCorrect } = await getBattleRoundPlayerAnswer(sessionId, r, you);
         playersOut.push({
           playerId: you,
+          isHost: !!me.isHost,
           isCorrect,
           lastAnswer,
+          answerText: lastAnswer,
+          submittedText: lastAnswer,
         });
       } else {
         for (const p of players) {
@@ -735,7 +887,14 @@ async function getBattleResult({ sessionId, user }) {
             r,
             p.playerId,
           );
-          playersOut.push({ playerId: p.playerId, isCorrect, lastAnswer });
+          playersOut.push({
+            playerId: p.playerId,
+            isHost: !!p.isHost,
+            isCorrect,
+            lastAnswer,
+            answerText: lastAnswer,
+            submittedText: lastAnswer,
+          });
         }
       }
 
@@ -743,12 +902,7 @@ async function getBattleResult({ sessionId, user }) {
 
       rounds.push({
         round: r,
-        question: {
-          questionId: q.id ?? q.questionId ?? (typeof q.id === 'number' ? String(q.id) : String(r)),
-          text: q.text ?? q.correctSentence ?? q.answer ?? null,
-          wrongText: q.wrongText ?? q.wrongSentence ?? null,
-          explanation: q.explanation ?? null,
-        },
+        question: buildBattleQuestionPayload(q),
         players: playersOut,
         winner: winnerForRound || null,
       });
@@ -784,7 +938,7 @@ async function getBattleResult({ sessionId, user }) {
     return {
       statusCode: 200,
       data: {
-        state: (session.status || 'ended').toUpperCase(),
+        state: toStatusValue(session.status || 'ended'),
         result,
         summary,
         rounds,
@@ -800,7 +954,7 @@ async function getBattleResult({ sessionId, user }) {
 }
 
 // 현재 배틀룸 상태를 스냅샷 형태로 반환
-async function getBattleRoom({ sessionId }) {
+async function getBattleRoom({ sessionId } = {}) {
   try {
     const session = await getSession(sessionId);
 
@@ -811,27 +965,50 @@ async function getBattleRoom({ sessionId }) {
       };
     }
 
-    let status = String(session.status || 'WAITING').toUpperCase();
-    const hostId = session.hostId || null;
-    const totalRounds = Number(session?.round?.total || session?.questions?.length || 5);
+    const base = await getSessionBasicForPlay(sessionId);
+    let status = String(base?.status || session.status || 'WAITING').toUpperCase();
+    const hostId = base?.hostId || session.hostId || null;
+    const baseRound = base?.round || session.round || { current: 1, total: 5 };
+
+    let currentRound = Number(baseRound.current || 1);
+    let totalRounds = Number(baseRound.total || session?.questions?.length || 5);
+    let deadlineFromState = null;
+
+    try {
+      const redis = await getRedis();
+      const [stCur, stTot, stStatus, stState, stEndAt] = await redis.hmGet(
+        keys.battleSessionState(sessionId),
+        [
+        'roundCurrent',
+        'roundTotal',
+        'status',
+        'state',
+        'roundEndsAt',
+        ],
+      );
+
+      if (stCur) currentRound = Number(stCur);
+      if (stTot) totalRounds = Number(stTot);
+      if (stStatus || stState) status = String(stStatus || stState).toUpperCase();
+      if (stEndAt) deadlineFromState = Number(stEndAt);
+    } catch (e) {
+      console.warn('[GET /api/battle/:sessionId] sync with WS state failed:', e?.message || e);
+    }
 
     let round = {
-      current: Number(session?.round?.current || 1),
+      current: currentRound,
       total: totalRounds,
     };
 
-    const summary = await getScores(sessionId);
-
     // timeout이면 먼저 처리
     if (status === 'PLAYING') {
-      const base = await getSessionBasicForPlay(sessionId);
-      const deadline = Number(base?.deadlineAt || 0);
+      const deadline = deadlineFromState ?? Number(base?.deadlineAt ?? session.deadlineAt ?? 0);
       const now = Date.now();
 
       if (deadline > 0 && now > deadline) {
         try {
           const moved = await advanceRoundOrEnd(sessionId, {
-            expectedRound: round.current,
+            expectedRound: currentRound,
             perRoundMs: BATTLE_ROUND_DURATION_MS,
           });
 
@@ -842,9 +1019,11 @@ async function getBattleRoom({ sessionId }) {
               latest?.status || (moved.ended ? 'ENDED' : 'PLAYING')
             ).toUpperCase();
 
+            currentRound = Number(latest?.round?.current || moved.currentRound || currentRound);
+            totalRounds = Number(latest?.round?.total || totalRounds);
             round = {
-              current: Number(latest?.round?.current || moved.currentRound || round.current),
-              total: Number(latest?.round?.total || totalRounds),
+              current: currentRound,
+              total: totalRounds,
             };
           }
         } catch (e) {
@@ -853,6 +1032,94 @@ async function getBattleRoom({ sessionId }) {
       }
     }
 
+    let players = Array.isArray(session.players) ? session.players.slice() : [];
+    if (!players.length && hostId) {
+      players = [{ playerId: hostId, isHost: true }];
+    }
+
+    const scoreMap = await getScores(sessionId);
+    const scoreById = (playerId) => Number(scoreMap?.[playerId] ?? 0);
+
+    const normalizedStatus = toUpperStatus(status);
+    const currentRoundNo = Number(round.current || 1);
+    const roundsTotal = Number(round.total || totalRounds);
+    const completedRounds =
+      normalizedStatus === 'ENDED'
+        ? roundsTotal
+        : normalizedStatus === 'PLAYING'
+          ? Math.max(0, currentRoundNo - 1)
+          : 0;
+
+    const winners = new Array(roundsTotal + 1).fill(null);
+    if (completedRounds > 0) {
+      const winnerList = await Promise.all(
+        Array.from({ length: completedRounds }, (_, idx) => getRoundWinner(sessionId, idx + 1)),
+      );
+
+      for (let idx = 0; idx < winnerList.length; idx += 1) {
+        winners[idx + 1] = winnerList[idx] || null;
+      }
+    }
+
+    let currentRoundWinner = null;
+    let currentRoundAnswersByPlayer = {};
+    if (normalizedStatus === 'PLAYING') {
+      currentRoundWinner = await getRoundWinner(sessionId, currentRoundNo);
+
+      const currentRoundAnswers = await Promise.all(
+        players.map(async (player) => [
+          player.playerId,
+          await getBattleRoundPlayerAnswer(sessionId, currentRoundNo, player.playerId),
+        ]),
+      );
+
+      currentRoundAnswersByPlayer = Object.fromEntries(currentRoundAnswers);
+    }
+
+    const summary = players.map((player) => {
+      const score = scoreById(player.playerId);
+      const perRound = [];
+
+      for (let roundNo = 1; roundNo <= roundsTotal; roundNo += 1) {
+        if (roundNo <= completedRounds) {
+          const winner = winners[roundNo];
+          perRound.push(winner ? winner === player.playerId : false);
+          continue;
+        }
+
+        if (normalizedStatus !== 'PLAYING' || roundNo !== currentRoundNo) {
+          perRound.push(null);
+          continue;
+        }
+
+        if (currentRoundWinner) {
+          perRound.push(currentRoundWinner === player.playerId);
+          continue;
+        }
+
+        const currentResult = currentRoundAnswersByPlayer[player.playerId]?.result ?? null;
+        if (currentResult === 'correct') {
+          perRound.push(true);
+        } else if (
+          currentResult === 'wrong' ||
+          currentResult === 'timeout' ||
+          currentResult === 'already_won'
+        ) {
+          perRound.push(false);
+        } else {
+          perRound.push(null);
+        }
+      }
+
+      return {
+        playerId: player.playerId,
+        isHost: !!player.isHost,
+        score,
+        wrong: perRound.filter((value) => value === false).length,
+        isCorrectByRound: perRound,
+      };
+    });
+
     // timeout 처리 후 최신 상태 기준으로 question 계산
     let question = null;
     if (status === 'PLAYING') {
@@ -860,13 +1127,7 @@ async function getBattleRoom({ sessionId }) {
       const idx = Math.max(0, Number(round.current || 1) - 1);
       const q = Array.isArray(latestSession?.questions) ? latestSession.questions[idx] : null;
 
-      if (q) {
-        const questionId = q.questionId ?? q.id ?? (typeof q.id === 'number' ? String(q.id) : null);
-        const text = q.text ?? q.correctSentence ?? q.answer ?? null;
-        if (questionId && text) {
-          question = { questionId, text };
-        }
-      }
+      question = buildBattleQuestionPayload(q);
     }
 
     // 남은 시간도 최신 deadline 기준으로 재계산
@@ -883,7 +1144,7 @@ async function getBattleRoom({ sessionId }) {
     return {
       statusCode: 200,
       data: {
-        status,
+        state: toStatusValue(status),
         hostId,
         round: {
           current: Number(round.current || 1),
@@ -945,7 +1206,6 @@ module.exports = {
   createRoom,
   startCountdown,
   entryRoom,
-  submitAnswer,
   submitBattleAnswerAttempt,
   getBattleResult,
   getBattleRoom,

@@ -8,7 +8,6 @@ const { rateLimiter } = require('../../utils/rateLimiter');
 const battleService = require('../../services/battleService');
 const {
   advanceRoundOrEnd,
-  getBattleScoreSummary,
   getSession,
 } = require('../../repositories/battleSessionRepo');
 const {
@@ -21,12 +20,7 @@ const roundTickerMap = new Map();
 // REST 스냅샷에 소켓 전용 점수 요약을 합쳐 반환
 async function makeSnapshot(sessionId) {
   const snapshot = await battleService.getBattleRoomSnapshot({ sessionId });
-  const summary = await getBattleScoreSummary(sessionId);
-
-  return {
-    ...snapshot,
-    summary,
-  };
+  return snapshot;
 }
 
 // 현재 배틀 상태를 룸 전체에 다시 전파
@@ -35,7 +29,7 @@ async function broadcastBattleSnapshot(io, sessionId, { previousRound = null } =
   const room = getBattleRoomChannel(sessionId);
 
   if (previousRound !== null) {
-    if (snapshot.status === 'ENDED') {
+    if (String(snapshot.state || '').toUpperCase() === 'ENDED') {
       io.to(room).emit('battle:round:end', { state: 'ENDED' });
       stopRoundTicker(sessionId);
     } else if (Number(snapshot.round?.current || 0) !== Number(previousRound)) {
@@ -214,16 +208,17 @@ function register(io, socket) {
         throw new Error(submission.data?.message || 'Failed to submit answer');
       }
 
-      const summary = await getBattleScoreSummary(sessionId);
-
       io.to(getBattleRoomChannel(sessionId)).emit('battle:answer:result', {
-        playerId: socket.data.user.playerId,
+        playerId: submission.data.playerId || socket.data.user.playerId,
         round,
         result: submission.data.result,
+        isCorrect: submission.data.isCorrect,
+        submittedText: submission.data.submittedText,
+        answerText: submission.data.submittedText,
         state: submission.data.state,
         winner: submission.data.winner,
         correctAnswer: submission.data.correctAnswer,
-        summary,
+        summary: submission.data.summary,
         ts: Date.now(),
       });
 

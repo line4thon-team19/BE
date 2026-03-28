@@ -123,6 +123,7 @@ async function getSessionBasicForPlay(sessionId) {
   if (!correctAnswer && Array.isArray(s.questions)) {
     const q = s.questions[currentRound - 1];
     if (q?.correctSentence) correctAnswer = q.correctSentence;
+    else if (q?.answer) correctAnswer = q.answer;
     else if (q?.text) correctAnswer = q.text;
   }
 
@@ -171,6 +172,7 @@ async function getBattleRoundPlayerAnswer(sessionId, round, playerId) {
 
     return {
       lastAnswer: text,
+      result,
       isCorrect,
     };
   }
@@ -182,6 +184,7 @@ async function getBattleRoundPlayerAnswer(sessionId, round, playerId) {
 
   return {
     lastAnswer: text ?? null,
+    result: result ?? null,
     isCorrect: result === 'correct',
   };
 }
@@ -199,7 +202,7 @@ async function claimRoundWinner(sessionId, round, playerId) {
 
   const ok = await redis.set(key, playerId, {
     NX: true,
-    PX: 2 * 60 * 1000,
+    EX: TTL,
   });
 
   return !!ok;
@@ -335,20 +338,6 @@ async function getScores(sessionId) {
 }
 
 // 플레이어별 점수와 오답 횟수를 요약 배열로 반환
-async function getBattleScoreSummary(sessionId) {
-  const redis = await getRedis();
-  const h = await redis.hGetAll(keys.battleScore(sessionId));
-  if (!h || !Object.keys(h).length) return [];
-
-  const scoreBoard = buildBattleScoreBoard(h);
-
-  return Object.entries(scoreBoard).map(([playerId, scoreRow]) => ({
-    playerId,
-    score: scoreRow.score,
-    wrong: scoreRow.wrong,
-  }));
-}
-
 // 세션 본문과 관련 보조 키를 한 번에 제거
 async function deleteSession(sessionId) {
   const redis = await getRedis();
@@ -396,6 +385,5 @@ module.exports = {
   addWrongAttempt,
   advanceRoundOrEnd,
   getScores,
-  getBattleScoreSummary,
   deleteSession,
 };

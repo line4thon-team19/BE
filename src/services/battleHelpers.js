@@ -32,7 +32,17 @@ function buildBattleAnswerResponse({
   result,
   winner = null,
   correctAnswer = null,
+  summary = [],
+  playerId = null,
+  submittedText = null,
+  isCorrect = result === 'correct',
 }) {
+  const normalizedState = String(state || '').toLowerCase();
+  const clientResult =
+    result === 'correct' || result === 'wrong' || result === 'timeout'
+      ? result
+      : 'timeout';
+
   return {
     statusCode: 201,
     data: {
@@ -40,10 +50,14 @@ function buildBattleAnswerResponse({
       next: { hasNext },
       sessionId,
       roomCode,
-      state,
-      result,
+      state: normalizedState,
+      result: clientResult,
+      isCorrect: Boolean(isCorrect),
       winner,
       correctAnswer,
+      playerId,
+      submittedText,
+      summary,
     },
   };
 }

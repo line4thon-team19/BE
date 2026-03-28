@@ -20,13 +20,6 @@ router.post(
   battleController.entryRoom
 );
 
-router.post(
-  '/:sessionId/answer',
-  authenticateGuest,
-  express.json(),
-  battleController.submitAnswer
-);
-
 router.get(
   '/:sessionId/result',
   authenticateGuest,
