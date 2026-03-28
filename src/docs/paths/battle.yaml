@@ -3,10 +3,7 @@ paths:
     post:
       tags: [Battle]
       summary: 배틀룸 생성
-      description: >
-        게스트 토큰으로 배틀룸(세션)을 생성합니다.
-        생성 시 상태는 항상 `waiting`이며,
-        클라이언트가 `state`, `round`, `status` 필드를 지정하면 400을 반환합니다.
+      description: 게스트 토큰으로 배틀룸을 생성합니다.
       security:
         - bearerAuth: []
       responses:
@@ -16,6 +13,12 @@ paths:
             application/json:
               schema:
                 $ref: '../components/schemas.yaml#/BattleRoomCreateResponse'
+              example:
+                sessionId: b_w1kGLU_M
+                roomCode: METZXD
+                state: waiting
+                hostId: plr_host123
+                inviteLink: https://hyunseoko.store/join/METZXD
         '400':
           $ref: '../components/responses.yaml#/BadRequest'
         '401':
@@ -31,11 +34,7 @@ paths:
     post:
       tags: [Battle]
       summary: 배틀룸 카운트다운 시작(방장)
-      description: |
-        방장이 카운트다운을 시작합니다. 
-        - 카운트다운이 끝나면 서버가 자동으로 `status`를 `playing`으로 업데이트합니다. 
-        - 중복 시작 방지를 위해 이미 카운트다운 진행 중이거나 `waiting`이 아닌 경우 409를 반환합니다. 
-        - 참여 인원이 2명이 아닐 경우(상대 미입장) 409를 반환합니다.
+      description: 방장이 카운트다운을 시작합니다.
       security:
         - bearerAuth: []
       parameters:
@@ -62,6 +61,30 @@ paths:
             application/json:
               schema:
                 $ref: '../components/schemas.yaml#/BattleCountdownStartResponse'
+              example:
+                started: true
+                state: waiting
+                countdown:
+                  seconds: 3
+                round:
+                  current: 1
+                  total: 5
+                questions:
+                  - questionId: '61'
+                    text: Example correct sentence 1
+                    explanation: Example explanation 1
+                  - questionId: '15'
+                    text: Example correct sentence 2
+                    explanation: Example explanation 2
+                  - questionId: '72'
+                    text: Example correct sentence 3
+                    explanation: Example explanation 3
+                  - questionId: '39'
+                    text: Example correct sentence 4
+                    explanation: Example explanation 4
+                  - questionId: '30'
+                    text: Example correct sentence 5
+                    explanation: Example explanation 5
         '400':
           $ref: '../components/responses.yaml#/BadRequest'
         '401':
@@ -81,10 +104,7 @@ paths:
     post:
       tags: [Battle]
       summary: 배틀룸 입장(상대 플레이어)
-      description: |
-        초대 코드(`roomCode`)로 대기 중인 배틀룸에 입장합니다.  
-        - 이미 2명이면 입장할 수 없습니다.
-        - 이 엔드포인트는 게스트 전용입니다. 방장(host)이 호출한 경우 방 상태만 반환하며 인원 추가는 수행하지 않습니다.
+      description:  초대 코드(roomCode)로 대기 중인 배틀룸에 입장합니다.
       security:
         - bearerAuth: []
       requestBody:
@@ -105,8 +125,17 @@ paths:
             application/json:
               schema:
                 $ref: '../components/schemas.yaml#/BattleEntryResponse'
+              example:
+                sessionId: b_w1kGLU_M
+                roomCode: METZXD
+                state: waiting
+                players:
+                  - playerId: plr_host123
+                    isHost: true
+                  - playerId: plr_guest456
+                    isHost: false
         '404':
-          description: Room Not Found
+          description: Room not found
           content:
             application/json:
               schema:
@@ -115,7 +144,7 @@ paths:
                   code: { type: string, example: 404_ROOM_NOT_FOUND }
                   message: { type: string, example: Room not found }
         '409':
-          description: Room Full
+          description: Room full
           content:
             application/json:
               schema:
@@ -124,7 +153,7 @@ paths:
                   code: { type: string, example: 409_ROOM_FULL }
                   message: { type: string, example: Room already has 2 players }
         '423':
-          description: Room Locked (Not waiting)
+          description: Room locked
           content:
             application/json:
               schema:
@@ -137,58 +166,10 @@ paths:
         '500':
           $ref: '../components/responses.yaml#/ServerError'
 
-  /api/battle/{sessionId}/answer:
-    post:
-      tags: [Battle]
-      summary: 배틀룸 정답 제출
-      description: |
-        현재 라운드에 정답을 제출합니다.  
-        - 첫 정답 선점자만 해당 라운드의 승자가 됩니다.  
-        - 이미 승자가 있거나 타이머가 만료된 후 제출하면 `result: timeout`으로 응답합니다.  
-        - 오답이면 `hasNext: false`로 현재 라운드를 유지합니다.
-      security:
-        - bearerAuth: []
-      parameters:
-        - in: path
-          name: sessionId
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [round, answer]
-              properties:
-                round:
-                  type: integer
-                  example: 3
-                answer:
-                  type: string
-                  example: '한 번 도전해 보자'
-      responses:
-        '201':
-          description: Answer judged
-          content:
-            application/json:
-              schema:
-                $ref: '../components/schemas.yaml#/BattleAnswerResponse'
-        '400':
-          $ref: '../components/responses.yaml#/BadRequest'
-        '401':
-          $ref: '../components/responses.yaml#/Unauthorized'
-        '404':
-          $ref: '../components/responses.yaml#/NotFound'
-        '409':
-          $ref: '../components/responses.yaml#/Conflict'
-        '500':
-          $ref: '../components/responses.yaml#/ServerError'
-
   /api/battle/{sessionId}/result:
     get:
       tags: [Battle]
-      summary: 배틀룸 결과 조회
+      summary: Get battle result
       security:
         - bearerAuth: []
       parameters:
@@ -203,6 +184,41 @@ paths:
             application/json:
               schema:
                 $ref: '../components/schemas.yaml#/BattleResultResponse'
+              example:
+                state: ended
+                result: lose
+                summary:
+                  - playerId: plr_guest456
+                    isHost: false
+                    score: 2
+                    wrong: 3
+                rounds:
+                  - round: 1
+                    question:
+                      questionId: '61'
+                      text: Example correct sentence 1
+                      explanation: Example explanation 1
+                    players:
+                      - playerId: plr_guest456
+                        isHost: false
+                        isCorrect: false
+                        lastAnswer: Example wrong answer 1
+                        answerText: Example wrong answer 1
+                        submittedText: Example wrong answer 1
+                    winner: plr_host123
+                  - round: 2
+                    question:
+                      questionId: '15'
+                      text: Example correct sentence 2
+                      explanation: Example explanation 2
+                    players:
+                      - playerId: plr_guest456
+                        isHost: false
+                        isCorrect: true
+                        lastAnswer: Example correct sentence 2
+                        answerText: Example correct sentence 2
+                        submittedText: Example correct sentence 2
+                    winner: plr_guest456
         '401':
           $ref: '../components/responses.yaml#/Unauthorized'
         '404':
@@ -214,10 +230,7 @@ paths:
     get:
       tags: [Battle]
       summary: 배틀룸 조회
-      description: |
-        세션의 현재 상태와 라운드/문제/점수 요약을 조회합니다.  
-        - status는 waiting/playing/ended 중 하나입니다.  
-        - playing일 때 현재 라운드의 문제를 포함해 반환합니다.
+      description: 세션의 현재 상태와 라운드/문제/점수 요약을 조회합니다.
       security:
         - bearerAuth: []
       parameters:
@@ -232,8 +245,30 @@ paths:
             application/json:
               schema:
                 $ref: '../components/schemas.yaml#/BattleRoomResponse'
+              example:
+                state: playing
+                hostId: plr_host123
+                round:
+                  current: 2
+                  total: 5
+                question:
+                  questionId: '15'
+                  text: Example correct sentence 2
+                  explanation: Example explanation 2
+                summary:
+                  - playerId: plr_host123
+                    isHost: true
+                    score: 1
+                    wrong: 0
+                    isCorrectByRound: [true, null, null, null, null]
+                  - playerId: plr_guest456
+                    isHost: false
+                    score: 0
+                    wrong: 1
+                    isCorrectByRound: [false, null, null, null, null]
+                remainingTime: 27
         '404':
-          description: Room Not Found
+          description: Room not found
           content:
             application/json:
               schema:
@@ -250,16 +285,14 @@ paths:
     delete:
       tags: [Battle]
       summary: 배틀룸 세션 삭제
-      description: >
-        사용자가 홈으로 돌아갈 때, 자신의 배틀 세션을 즉시 삭제합니다.
-        (Redis에서 배틀 세션 및 관련 인덱스를 삭제합니다.)
+      description: 사용자가 홈으로 돌아갈 때, 자신의 배틀 세션을 즉시 삭제합니다.
       security:
         - bearerAuth: []
       parameters:
         - in: path
           name: sessionId
           required: true
-          description: 배틀 세션 ID
+          description: Battle session ID
           schema:
             type: string
             example: b_ab12cd34
@@ -270,6 +303,10 @@ paths:
             application/json:
               schema:
                 $ref: '../components/schemas.yaml#/BattleDeleteResponse'
+              example:
+                deleted: true
+                sessionId: b_w1kGLU_M
+                message: Battle session deleted
         '401':
           $ref: '../components/responses.yaml#/Unauthorized'
         '404':
