@@ -1,4 +1,4 @@
-GuestResponse:
+﻿GuestResponse:
   type: object
   properties:
     playerId: { type: string, example: plr_w2a1bC7X9pQe }
@@ -210,15 +210,10 @@ BattleQuestion:
   type: object
   properties:
     questionId: { type: string, example: '4' }
-    text: { type: string, example: '오늘은 날씨가 참 좋다.' }
-    wrongText:
+    text:
       type: string
       nullable: true
-      example: '오늘은날씨가 참 좋다.'
-    answer:
-      type: string
-      nullable: true
-      example: '오늘은 날씨가 참 좋다.'
+      example: '오늘은 날씨가 참 좋다'
     explanation:
       type: string
       nullable: true
@@ -239,7 +234,7 @@ BattlePlayerSummary:
         type: boolean
         nullable: true
       example: [true, true, false, null, null]
-  required: [playerId, isHost, score, wrong]
+  required: [playerId, isHost, score, wrong, isCorrectByRound]
 
 BattleEntryPlayer:
   type: object
@@ -252,24 +247,39 @@ BattleRoundPlayerResult:
   type: object
   properties:
     playerId: { type: string, example: plr_uKIr83x4QBiW }
+    isHost: { type: boolean, example: false }
     isCorrect: { type: boolean, example: false }
     lastAnswer:
       type: string
       nullable: true
       example: '설거지'
-  required: [playerId, isCorrect]
+    answerText:
+      type: string
+      nullable: true
+      example: '설거지'
+    submittedText:
+      type: string
+      nullable: true
+      example: '설거지'
+  required: [playerId, isHost, isCorrect, lastAnswer, answerText, submittedText]
 
 BattleRoundResult:
   type: object
   properties:
     round: { type: integer, example: 1 }
     question:
-      $ref: '#/BattleQuestion'
+      allOf:
+        - $ref: '#/BattleQuestion'
+      nullable: true
     players:
       type: array
       items:
         $ref: '#/BattleRoundPlayerResult'
-  required: [round, question, players]
+    winner:
+      type: string
+      nullable: true
+      example: plr_uKIr83x4QBiW
+  required: [round, question, players, winner]
 
 # Battle 응답 객체
 BattleRoomCreateResponse:
@@ -281,7 +291,7 @@ BattleRoomCreateResponse:
     roomCode:
       type: string
       example: XH6NZR
-    status:
+    state:
       type: string
       enum: [waiting, playing, ended]
       example: waiting
@@ -292,7 +302,7 @@ BattleRoomCreateResponse:
       type: string
       format: uri
       example: https://hyunseoko.store/join/XH6NZR
-  required: [sessionId, roomCode, status, hostId, inviteLink]
+  required: [sessionId, roomCode, state, hostId, inviteLink]
 
 BattleCountdownStartResponse:
   type: object
@@ -300,7 +310,7 @@ BattleCountdownStartResponse:
     started:
       type: boolean
       example: true
-    status:
+    state:
       type: string
       enum: [waiting, playing, ended]
       example: waiting
@@ -314,7 +324,7 @@ BattleCountdownStartResponse:
       maxItems: 5
       items:
         $ref: '#/BattleQuestion'
-  required: [started, status, countdown, round, questions]
+  required: [started, state, countdown, round, questions]
 
 BattleEntryResponse:
   type: object
@@ -325,7 +335,7 @@ BattleEntryResponse:
     roomCode:
       type: string
       example: C2R699
-    status:
+    state:
       type: string
       enum: [waiting, playing, ended]
       example: waiting
@@ -335,49 +345,7 @@ BattleEntryResponse:
       maxItems: 2
       items:
         $ref: '#/BattleEntryPlayer'
-  required: [sessionId, roomCode, status, players]
-
-BattleAnswerResponse:
-  type: object
-  properties:
-    round:
-      $ref: '#/BattleRound'
-    next:
-      type: object
-      properties:
-        hasNext: { type: boolean, example: true }
-      required: [hasNext]
-    sessionId:
-      type: string
-      example: b_c9XBcpmP
-    roomCode:
-      type: string
-      example: C2R699
-    status:
-      type: string
-      enum: [playing, ended]
-      example: playing
-    result:
-      type: string
-      enum: [correct, wrong, timeout]
-      example: correct
-    winner:
-      type: string
-      nullable: true
-      description: 승자의 playerId. 승자 없음이면 null.
-      example: plr_Vy4_SS-FWM7y
-    correctAnswer:
-      type: string
-      nullable: true
-      description: 정답. 오답/타임아웃일 때는 비노출(null) 가능.
-      example: '할머니께 문안 인사를 드렸다.'
-  required:
-    - round
-    - next
-    - sessionId
-    - roomCode
-    - status
-    - result
+  required: [sessionId, roomCode, state, players]
 
 BattleResultSummaryPlayer:
   type: object
@@ -391,9 +359,9 @@ BattleResultSummaryPlayer:
 BattleResultResponse:
   type: object
   properties:
-    status:
+    state:
       type: string
-      enum: [ended]
+      enum: [waiting, playing, ended]
       example: ended
     result:
       type: string
@@ -409,12 +377,12 @@ BattleResultResponse:
       type: array
       items:
         $ref: '#/BattleRoundResult'
-  required: [status, summary, rounds]
+  required: [state, summary, rounds]
 
 BattleRoomResponse:
   type: object
   properties:
-    status:
+    state:
       type: string
       enum: [waiting, playing, ended]
       example: playing
@@ -435,7 +403,7 @@ BattleRoomResponse:
       type: integer
       description: 남은 시간(초). 없으면 0.
       example: 20
-  required: [status, hostId, round, summary, remainingTime]
+  required: [state, hostId, round, summary, remainingTime]
 
 BattleDeleteResponse:
   type: object

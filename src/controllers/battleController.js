@@ -30,16 +30,6 @@ async function entryRoom(req, res) {
   return res.status(result.statusCode).json(result.data);
 }
 
-async function submitAnswer(req, res) {
-  const result = await battleService.submitAnswer({
-    sessionId: req.params.sessionId,
-    body: req.body,
-    user: req.user,
-  });
-
-  return res.status(result.statusCode).json(result.data);
-}
-
 async function getBattleResult(req, res) {
   const result = await battleService.getBattleResult({
     sessionId: req.params.sessionId,
@@ -52,6 +42,7 @@ async function getBattleResult(req, res) {
 async function getBattleRoom(req, res) {
   const result = await battleService.getBattleRoom({
     sessionId: req.params.sessionId,
+    user: req.user,
   });
 
   return res.status(result.statusCode).json(result.data);
@@ -69,7 +60,6 @@ module.exports = {
   createRoom,
   startCountdown,
   entryRoom,
-  submitAnswer,
   getBattleResult,
   getBattleRoom,
   deleteBattleRoom,
