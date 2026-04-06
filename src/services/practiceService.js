@@ -1,11 +1,11 @@
-const crypto = require('crypto');
-const { getMysql } = require('../libs/mysqlClient');
 const {
   createPracticeSession,
   getPracticeSession: findSession,
   savePracticeSession,
   deletePracticeSession: removeSession,
 } = require('../repositories/practiceSessionRepo');
+const { getRandomQuestions } = require('../repositories/practiceQuestionRepo');
+const { newPracticeSessionId } = require('../utils/id');
 
 function calcCountdown(sess) {
   if (typeof sess?.countdownEndAt !== 'number') return null;
@@ -66,10 +66,17 @@ function buildIsCorrectByRound(sess) {
   return byRound;
 }
 
+function buildPracticeQuestionPayload(question) {
+  if (!question) return null;
+  return {
+    questionId: String(question.id),
+    text: question.text,
+    options: [question.choice1, question.choice2],
+  };
+}
+
 async function startPractice({ body, user }) {
   try {
-    const pool = await getMysql();
-
     const countdownSec = Number(body?.countdownSec ?? 3);
     if (!Number.isInteger(countdownSec) || countdownSec < 0 || countdownSec > 30) {
       return {
@@ -79,22 +86,16 @@ async function startPractice({ body, user }) {
     }
 
     const total = 5;
-    const [rows] = await pool.query(
-      `SELECT id, sentence, choice1, choice2, answer AS answerLabel, explanation
-       FROM PracticeQuestion
-       ORDER BY RAND()
-       LIMIT ?`,
-      [total],
-    );
+    const rows = await getRandomQuestions(total);
 
     if (rows.length < total) {
       return {
         statusCode: 409,
-        data: { message: `문제가 ${total}개보다 적습니다.` },
+        data: { message: 'Not enough practice questions to start the session' },
       };
     }
 
-    const sessionId = `p_${crypto.randomBytes(6).toString('base64url')}`;
+    const sessionId = newPracticeSessionId();
     const timeLimit = 20;
 
     const serverQuestions = rows.map((q) => ({
@@ -126,11 +127,7 @@ async function startPractice({ body, user }) {
 
     await createPracticeSession(session);
 
-    const clientQuestions = serverQuestions.map((q) => ({
-      questionId: String(q.id),
-      text: q.text,
-      options: [q.choice1, q.choice2],
-    }));
+    const clientQuestions = serverQuestions.map(buildPracticeQuestionPayload);
 
     const countdown =
       countdownEndAt != null ? { seconds: Math.ceil((countdownEndAt - now) / 1000) } : undefined;
@@ -259,11 +256,7 @@ async function submitPracticeAnswer({ sessionId, body, user }) {
           next: {
             hasNext: true,
             result: 'timeout',
-            question: {
-              questionId: String(nq.id),
-              text: nq.text,
-              options: [nq.choice1, nq.choice2],
-            },
+            question: buildPracticeQuestionPayload(nq),
           },
           isCorrectByRound: buildIsCorrectByRound(sess),
         },
@@ -323,11 +316,7 @@ async function submitPracticeAnswer({ sessionId, body, user }) {
         next: {
           hasNext: true,
           result: isCorrect ? 'correct' : 'wrong',
-          question: {
-            questionId: String(nq.id),
-            text: nq.text,
-            options: [nq.choice1, nq.choice2],
-          },
+          question: buildPracticeQuestionPayload(nq),
         },
         isCorrectByRound: buildIsCorrectByRound(sess),
       },
@@ -496,9 +485,7 @@ async function getPracticeSession({ sessionId, user }) {
       };
     }
 
-    const currentQuestion = q
-      ? { questionId: String(q.id), text: q.text, options: [q.choice1, q.choice2] }
-      : null;
+    const currentQuestion = buildPracticeQuestionPayload(q);
 
     return {
       statusCode: 200,
